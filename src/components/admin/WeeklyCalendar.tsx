@@ -118,7 +118,7 @@ export default function WeeklyCalendar({ blocks, weekOffset, mondayISO }: Props)
                 <div className="space-y-1.5">
                   {dayBlocks.map(block => {
                     const hasClients = block.clients.length > 0
-                    const isFull = block.current_count >= block.max_capacity
+                    const isFull = block.clients.length >= block.max_capacity
                     const isExpanded = expanded === block.id
 
                     return (
@@ -150,7 +150,7 @@ export default function WeeklyCalendar({ blocks, weekOffset, mondayISO }: Props)
                                   ? 'bg-blue-50 text-blue-700'
                                   : 'bg-gray-100 text-gray-400'
                               }`}>
-                              {block.current_count}/{block.max_capacity}
+                              {block.clients.length}/{block.max_capacity}
                             </span>
 
                             {/* Client names preview (collapsed) */}

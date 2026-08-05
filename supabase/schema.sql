@@ -62,11 +62,13 @@ CREATE TABLE public.plans (
   created_at         timestamptz NOT NULL DEFAULT now()
 );
 
--- Datos iniciales de los 3 packs
+-- Datos iniciales de los packs
+-- Pack Familia: clases ilimitadas (9999 = sentinel de "ilimitado" usado en toda la app) y gratis
 INSERT INTO public.plans (name, classes_per_month, price_monthly) VALUES
   ('Pack Inicio',    8,  50000),
   ('Pack Transforma', 12, 64990),
-  ('Pack Elite',     20, 94990);
+  ('Pack Elite',     20, 94990),
+  ('Pack Familia',   9999, 0);
 
 
 -- ─────────────────────────────────────────

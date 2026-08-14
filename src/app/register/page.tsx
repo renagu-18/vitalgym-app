@@ -86,21 +86,12 @@ export default function RegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Prefiero recibir notificaciones por
+                  Recibirás notificaciones por
                 </label>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className="flex items-center gap-2 p-3 border border-gray-300 rounded-lg cursor-pointer
-                                    has-[:checked]:border-brand has-[:checked]:bg-gray-50">
-                    <input type="radio" name="notify_via" value="whatsapp" defaultChecked
-                           className="accent-brand" />
-                    <span className="text-sm font-medium">WhatsApp</span>
-                  </label>
-                  <label className="flex items-center gap-2 p-3 border border-gray-300 rounded-lg cursor-pointer
-                                    has-[:checked]:border-brand has-[:checked]:bg-gray-50">
-                    <input type="radio" name="notify_via" value="gmail"
-                           className="accent-brand" />
-                    <span className="text-sm font-medium">Gmail</span>
-                  </label>
+                <div className="flex items-center gap-2 p-3 border border-brand rounded-lg bg-gray-50">
+                  <input type="radio" name="notify_via" value="gmail" checked readOnly
+                         className="accent-brand" />
+                  <span className="text-sm font-medium">Gmail</span>
                 </div>
               </div>
             </div>

@@ -88,6 +88,35 @@ CREATE TABLE public.subscriptions (
   created_at          timestamptz NOT NULL DEFAULT now()
 );
 
+-- Función: ajusta en ±1 las clases restantes de la propia suscripción activa del cliente,
+-- de forma atómica (evita condiciones de carrera) y sin necesitar permiso de UPDATE directo
+-- sobre la tabla (RLS solo permite SELECT al cliente; el admin sigue gestionando todo lo demás).
+-- Se usa desde requestBooking (delta -1) y cancelBooking (delta +1) en el cliente.
+CREATE OR REPLACE FUNCTION public.adjust_my_subscription_classes(
+  p_subscription_id uuid,
+  p_delta int
+)
+RETURNS boolean AS $$
+DECLARE
+  v_updated int;
+BEGIN
+  IF p_delta NOT IN (-1, 1) THEN
+    RAISE EXCEPTION 'delta inválido: %', p_delta;
+  END IF;
+
+  UPDATE public.subscriptions
+  SET classes_remaining = classes_remaining + p_delta
+  WHERE id = p_subscription_id
+    AND client_id = auth.uid()
+    AND status = 'active'
+    AND classes_remaining < 9999           -- planes ilimitados no se tocan
+    AND (p_delta = 1 OR classes_remaining > 0); -- solo descuenta si queda saldo
+
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+  RETURN v_updated > 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 CREATE INDEX idx_subscriptions_client ON public.subscriptions(client_id);
 CREATE INDEX idx_subscriptions_status ON public.subscriptions(status);
 

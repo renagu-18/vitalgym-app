@@ -38,6 +38,21 @@ export async function requestBooking(timeBlockId: string) {
 
   if (!sub || sub.classes_remaining <= 0) return { error: 'No tienes clases disponibles en tu suscripción' }
 
+  const isUnlimited = sub.classes_remaining >= 9999
+
+  // Reclama la clase de forma atómica antes de insertar la reserva (vía RPC porque el
+  // cliente no tiene permiso de UPDATE directo sobre subscriptions bajo RLS). El descuento
+  // ocurre en una sola sentencia SQL en la base de datos, así que dos solicitudes concurrentes
+  // (doble clic, reintento de red) no pueden ambas pasar con el mismo cupo disponible.
+  if (!isUnlimited) {
+    const { data: claimed, error: claimError } = await supabase
+      .rpc('adjust_my_subscription_classes', { p_subscription_id: sub.id, p_delta: -1 })
+
+    if (claimError || !claimed) {
+      return { error: 'No tienes clases disponibles en tu suscripción' }
+    }
+  }
+
   const { error: insertError } = await supabase
     .from('bookings')
     .insert({
@@ -48,15 +63,12 @@ export async function requestBooking(timeBlockId: string) {
     })
 
   if (insertError) {
+    // La reserva no se pudo crear pero ya habíamos reclamado la clase: revertir el descuento.
+    if (!isUnlimited) {
+      await supabase.rpc('adjust_my_subscription_classes', { p_subscription_id: sub.id, p_delta: 1 })
+    }
     if (insertError.code === '23505') return { error: 'Ya tienes una reserva para este horario' }
     return { error: 'Error al crear la reserva. Intenta nuevamente.' }
-  }
-
-  if (sub.classes_remaining < 9999) {
-    await supabase
-      .from('subscriptions')
-      .update({ classes_remaining: sub.classes_remaining - 1 })
-      .eq('id', sub.id)
   }
 
   if (profile) {
@@ -98,7 +110,7 @@ export async function cancelBooking(bookingId: string) {
 
   if (updateError) return { error: 'Error al cancelar' }
 
-  // Si estaba aprobada, devolver la clase al contador
+  // Si estaba aprobada, devolver la clase al contador (misma RPC atómica que requestBooking)
   if (booking.status === 'approved') {
     const { data: sub } = await supabase
       .from('subscriptions')
@@ -108,10 +120,7 @@ export async function cancelBooking(bookingId: string) {
       .single()
 
     if (sub && sub.classes_remaining < 9999) {
-      await supabase
-        .from('subscriptions')
-        .update({ classes_remaining: sub.classes_remaining + 1 })
-        .eq('id', sub.id)
+      await supabase.rpc('adjust_my_subscription_classes', { p_subscription_id: sub.id, p_delta: 1 })
     }
   }
 

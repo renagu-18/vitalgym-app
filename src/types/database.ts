@@ -436,6 +436,10 @@ export type Database = {
         Args: Record<string, never>
         Returns: boolean
       }
+      adjust_my_subscription_classes: {
+        Args: { p_subscription_id: string; p_delta: number }
+        Returns: boolean
+      }
     }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>

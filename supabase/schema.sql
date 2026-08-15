@@ -272,6 +272,13 @@ CREATE TRIGGER bookings_sync_count
   AFTER UPDATE ON public.bookings
   FOR EACH ROW EXECUTE FUNCTION sync_block_count();
 
+-- La función ya contempla el caso INSERT (ver "OLD.status IS NULL" arriba): cuando una
+-- reserva se crea directamente como 'approved' (auto-aprobación en requestBooking, sin pasar
+-- por un UPDATE de pending -> approved), solo este trigger AFTER INSERT la captura.
+CREATE TRIGGER bookings_sync_count_insert
+  AFTER INSERT ON public.bookings
+  FOR EACH ROW EXECUTE FUNCTION sync_block_count();
+
 
 -- ─────────────────────────────────────────
 -- 7. RUTINAS Y EJERCICIOS

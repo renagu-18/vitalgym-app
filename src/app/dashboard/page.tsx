@@ -60,9 +60,9 @@ export default async function DashboardPage() {
   const nextEnd   = nextBlock ? new Date(nextBlock.end_time)   : null
 
   const fmtDate = (d: Date) =>
-    d.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' })
+    d.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Santiago' })
   const fmtTime = (d: Date) =>
-    d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false })
+    d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Santiago' })
 
   const quickCards = [
     {

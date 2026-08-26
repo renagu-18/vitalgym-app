@@ -34,6 +34,9 @@ export async function requestBooking(timeBlockId: string) {
   const hoursUntil = (new Date(block.start_time).getTime() - Date.now()) / (1000 * 60 * 60)
   if (hoursUntil < 12) return { error: 'Debes reservar con al menos 12 horas de anticipación' }
 
+  // Chequeo rápido para feedback inmediato en la UI (no atómico, es solo un snapshot).
+  // La validación real e infranqueable ocurre dentro de book_time_block más abajo, que
+  // bloquea la fila del bloque y verifica el cupo en la misma transacción del INSERT.
   if (block.current_count >= block.max_capacity) return { error: 'Este bloque ya no tiene cupos disponibles' }
 
   if (!sub || sub.classes_remaining <= 0) return { error: 'No tienes clases disponibles en tu suscripción' }
@@ -53,21 +56,17 @@ export async function requestBooking(timeBlockId: string) {
     }
   }
 
-  const { error: insertError } = await supabase
-    .from('bookings')
-    .insert({
-      client_id: user.id,
-      time_block_id: timeBlockId,
-      status: 'approved',
-      notified_at: new Date().toISOString(),
-    })
+  const { error: bookError } = await supabase
+    .rpc('book_time_block', { p_time_block_id: timeBlockId })
 
-  if (insertError) {
+  if (bookError) {
     // La reserva no se pudo crear pero ya habíamos reclamado la clase: revertir el descuento.
     if (!isUnlimited) {
       await supabase.rpc('adjust_my_subscription_classes', { p_subscription_id: sub.id, p_delta: 1 })
     }
-    if (insertError.code === '23505') return { error: 'Ya tienes una reserva para este horario' }
+    if (bookError.code === '23505') return { error: 'Ya tienes una reserva para este horario' }
+    if (bookError.code === 'P0002') return { error: 'Este bloque ya no tiene cupos disponibles' }
+    if (bookError.code === 'P0001') return { error: 'Bloque no encontrado o inactivo' }
     return { error: 'Error al crear la reserva. Intenta nuevamente.' }
   }
 

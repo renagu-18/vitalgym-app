@@ -279,6 +279,43 @@ CREATE TRIGGER bookings_sync_count_insert
   AFTER INSERT ON public.bookings
   FOR EACH ROW EXECUTE FUNCTION sync_block_count();
 
+-- Función: reserva un cupo de forma atómica. Bloquea la fila del bloque (SELECT ... FOR UPDATE)
+-- para serializar solicitudes concurrentes sobre el mismo horario, valida el cupo con el dato
+-- ya bloqueado (no un snapshot leído antes) y crea el booking en la misma transacción. Así,
+-- si dos clientes piden el último cupo al mismo tiempo, el segundo espera a que el primero
+-- termine y ve el current_count ya actualizado (por el trigger de arriba) antes de decidir.
+-- Devuelve el id de la reserva creada; lanza excepción (con SQLSTATE propio) si no hay cupo,
+-- el bloque no existe/está inactivo, o el cliente ya tiene una reserva para ese horario.
+CREATE OR REPLACE FUNCTION public.book_time_block(p_time_block_id uuid)
+RETURNS uuid AS $$
+DECLARE
+  v_current_count int;
+  v_max_capacity  int;
+  v_is_active     boolean;
+  v_booking_id    uuid;
+BEGIN
+  SELECT current_count, max_capacity, is_active
+  INTO v_current_count, v_max_capacity, v_is_active
+  FROM public.time_blocks
+  WHERE id = p_time_block_id
+  FOR UPDATE;
+
+  IF NOT FOUND OR NOT v_is_active THEN
+    RAISE EXCEPTION 'Bloque no encontrado o inactivo' USING ERRCODE = 'P0001';
+  END IF;
+
+  IF v_current_count >= v_max_capacity THEN
+    RAISE EXCEPTION 'Este bloque ya no tiene cupos disponibles' USING ERRCODE = 'P0002';
+  END IF;
+
+  INSERT INTO public.bookings (client_id, time_block_id, status, notified_at)
+  VALUES (auth.uid(), p_time_block_id, 'approved', now())
+  RETURNING id INTO v_booking_id;
+
+  RETURN v_booking_id;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 
 -- ─────────────────────────────────────────
 -- 7. RUTINAS Y EJERCICIOS

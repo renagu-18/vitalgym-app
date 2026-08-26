@@ -440,6 +440,10 @@ export type Database = {
         Args: { p_subscription_id: string; p_delta: number }
         Returns: boolean
       }
+      book_time_block: {
+        Args: { p_time_block_id: string }
+        Returns: string
+      }
     }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>

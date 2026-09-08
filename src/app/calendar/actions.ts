@@ -39,31 +39,17 @@ export async function requestBooking(timeBlockId: string) {
   // bloquea la fila del bloque y verifica el cupo en la misma transacción del INSERT.
   if (block.current_count >= block.max_capacity) return { error: 'Este bloque ya no tiene cupos disponibles' }
 
-  if (!sub || sub.classes_remaining <= 0) return { error: 'No tienes clases disponibles en tu suscripción' }
-
-  const isUnlimited = sub.classes_remaining >= 9999
-
-  // Reclama la clase de forma atómica antes de insertar la reserva (vía RPC porque el
-  // cliente no tiene permiso de UPDATE directo sobre subscriptions bajo RLS). El descuento
-  // ocurre en una sola sentencia SQL en la base de datos, así que dos solicitudes concurrentes
-  // (doble clic, reintento de red) no pueden ambas pasar con el mismo cupo disponible.
-  if (!isUnlimited) {
-    const { data: claimed, error: claimError } = await supabase
-      .rpc('adjust_my_subscription_classes', { p_subscription_id: sub.id, p_delta: -1 })
-
-    if (claimError || !claimed) {
-      return { error: 'No tienes clases disponibles en tu suscripción' }
-    }
+  // Bug 2: sin clases disponibles, no se puede reservar. El descuento de la clase ya NO ocurre
+  // acá (ver Bug 1) — solo cuando la clase se completa (complete_past_bookings / completeBooking)
+  // — pero esta validación de saldo sigue siendo necesaria para no dejar reservar con 0 clases.
+  if (!sub || sub.classes_remaining <= 0) {
+    return { error: 'No tienes clases disponibles en tu plan actual. Contáctanos para renovar.' }
   }
 
   const { error: bookError } = await supabase
     .rpc('book_time_block', { p_time_block_id: timeBlockId })
 
   if (bookError) {
-    // La reserva no se pudo crear pero ya habíamos reclamado la clase: revertir el descuento.
-    if (!isUnlimited) {
-      await supabase.rpc('adjust_my_subscription_classes', { p_subscription_id: sub.id, p_delta: 1 })
-    }
     if (bookError.code === '23505') return { error: 'Ya tienes una reserva para este horario' }
     if (bookError.code === 'P0002') return { error: 'Este bloque ya no tiene cupos disponibles' }
     if (bookError.code === 'P0001') return { error: 'Bloque no encontrado o inactivo' }
@@ -109,19 +95,9 @@ export async function cancelBooking(bookingId: string) {
 
   if (updateError) return { error: 'Error al cancelar' }
 
-  // Si estaba aprobada, devolver la clase al contador (misma RPC atómica que requestBooking)
-  if (booking.status === 'approved') {
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('id, classes_remaining')
-      .eq('client_id', user.id)
-      .eq('status', 'active')
-      .single()
-
-    if (sub && sub.classes_remaining < 9999) {
-      await supabase.rpc('adjust_my_subscription_classes', { p_subscription_id: sub.id, p_delta: 1 })
-    }
-  }
+  // Ya no hay que devolver ninguna clase: el descuento ocurre recién al completar la reserva
+  // (ver Bug 1), y una reserva 'completed' no es cancelable (chequeo de arriba), así que
+  // cancelar una 'pending' o 'approved' nunca implicó descuento en primer lugar.
 
   revalidatePath('/calendar')
   return { success: true }

@@ -1,9 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight, ChevronDown, CalendarDays } from 'lucide-react'
+import { ChevronLeft, ChevronRight, ChevronDown, CalendarDays, Check, Loader2 } from 'lucide-react'
 import type { BlockData } from '@/app/admin/bookings/page'
+import { completeBooking } from '@/app/admin/bookings/actions'
 
 const TZ = 'America/Santiago'
 
@@ -48,7 +50,19 @@ function weekLabel(weekOffset: number) {
 }
 
 export default function WeeklyCalendar({ blocks, weekOffset, mondayISO }: Props) {
+  const router = useRouter()
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [completingId, setCompletingId] = useState<string | null>(null)
+  const [isPending, startTransition] = useTransition()
+
+  function handleComplete(bookingId: string) {
+    setCompletingId(bookingId)
+    startTransition(async () => {
+      await completeBooking(bookingId)
+      setCompletingId(null)
+      router.refresh()
+    })
+  }
 
   // Group blocks by Santiago date
   const dayMap = new Map<string, BlockData[]>()
@@ -174,17 +188,30 @@ export default function WeeklyCalendar({ blocks, weekOffset, mondayISO }: Props)
                         {isExpanded && (
                           <div className="px-4 pb-3 pt-1 border-t border-gray-100 space-y-2">
                             {block.clients.map(client => (
-                              <Link
-                                key={client.id}
-                                href={`/admin/clients/${client.id}`}
-                                className="flex items-center gap-2.5 hover:opacity-75 transition-opacity"
-                              >
-                                <div className="w-7 h-7 rounded-full bg-brand text-white
-                                               flex items-center justify-center text-xs font-bold shrink-0">
-                                  {client.full_name.charAt(0).toUpperCase()}
-                                </div>
-                                <span className="text-sm text-gray-800">{client.full_name}</span>
-                              </Link>
+                              <div key={client.id} className="flex items-center justify-between gap-2">
+                                <Link
+                                  href={`/admin/clients/${client.id}`}
+                                  className="flex items-center gap-2.5 hover:opacity-75 transition-opacity min-w-0"
+                                >
+                                  <div className="w-7 h-7 rounded-full bg-brand text-white
+                                                 flex items-center justify-center text-xs font-bold shrink-0">
+                                    {client.full_name.charAt(0).toUpperCase()}
+                                  </div>
+                                  <span className="text-sm text-gray-800 truncate">{client.full_name}</span>
+                                </Link>
+                                <button
+                                  onClick={() => handleComplete(client.bookingId)}
+                                  disabled={isPending && completingId === client.bookingId}
+                                  className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-lg text-[11px]
+                                             font-semibold text-green-700 bg-green-50 hover:bg-green-100
+                                             disabled:opacity-50 transition-colors"
+                                >
+                                  {isPending && completingId === client.bookingId
+                                    ? <Loader2 size={12} className="animate-spin" />
+                                    : <Check size={12} />}
+                                  Completada
+                                </button>
+                              </div>
                             ))}
                           </div>
                         )}

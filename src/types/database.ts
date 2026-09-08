@@ -182,7 +182,7 @@ export type Database = {
           id: string
           client_id: string
           time_block_id: string
-          status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+          status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed'
           rejection_reason: string | null
           notified_at: string | null
           reminder_sent: boolean
@@ -193,7 +193,7 @@ export type Database = {
           id?: string
           client_id: string
           time_block_id: string
-          status?: 'pending' | 'approved' | 'rejected' | 'cancelled'
+          status?: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed'
           rejection_reason?: string | null
           notified_at?: string | null
           reminder_sent?: boolean
@@ -201,7 +201,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          status?: 'pending' | 'approved' | 'rejected' | 'cancelled'
+          status?: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed'
           rejection_reason?: string | null
           notified_at?: string | null
           reminder_sent?: boolean
@@ -443,6 +443,10 @@ export type Database = {
       book_time_block: {
         Args: { p_time_block_id: string }
         Returns: string
+      }
+      complete_past_bookings: {
+        Args: Record<string, never>
+        Returns: number
       }
     }
     Enums: Record<string, never>

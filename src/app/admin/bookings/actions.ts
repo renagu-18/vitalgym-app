@@ -52,20 +52,9 @@ export async function approveBooking(bookingId: string) {
 
   if (updateError) return { error: 'Error al aprobar la reserva' }
 
-  // Decrementar clases disponibles del cliente
-  const { data: sub } = await supabase
-    .from('subscriptions')
-    .select('id, classes_remaining')
-    .eq('client_id', booking.client_id)
-    .eq('status', 'active')
-    .single()
-
-  if (sub && sub.classes_remaining > 0) {
-    await supabase
-      .from('subscriptions')
-      .update({ classes_remaining: sub.classes_remaining - 1 })
-      .eq('id', sub.id)
-  }
+  // Ya no se descuenta la clase acá: aprobar solo confirma el cupo. El descuento ocurre
+  // recién cuando la clase se completa (completeBooking, o automáticamente cuando pasa
+  // start_time vía complete_past_bookings).
 
   // Webhook a n8n
   const client = booking.client as {
@@ -136,6 +125,47 @@ export async function rejectBooking(bookingId: string, reason?: string) {
       booking_time: time,
       rejection_reason: reason,
     })
+  }
+
+  revalidatePath('/admin/bookings')
+  revalidatePath('/admin')
+  return { success: true }
+}
+
+// Marca una reserva aprobada como completada (la clase ya se dictó) y recién en ese momento
+// descuenta 1 clase de la suscripción activa del cliente. Es el mismo descuento que aplica
+// automáticamente complete_past_bookings() cuando pasa start_time; esta es la versión manual
+// para cuando el admin quiere completarla antes de que corra el cron.
+export async function completeBooking(bookingId: string) {
+  const { supabase, error: authError } = await verifyAdmin()
+  if (!supabase) return { error: authError }
+
+  // Update con guard: solo transiciona si sigue 'approved', para no descontar dos veces
+  // si se hace doble clic o la reserva ya fue completada por el cron mientras tanto.
+  const { data: updated, error: updateError } = await supabase
+    .from('bookings')
+    .update({ status: 'completed', updated_at: new Date().toISOString() })
+    .eq('id', bookingId)
+    .eq('status', 'approved')
+    .select('client_id')
+
+  if (updateError) return { error: 'Error al completar la reserva' }
+  if (!updated || updated.length === 0) return { error: 'La reserva no está aprobada o ya fue procesada' }
+
+  const clientId = updated[0].client_id
+
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('id, classes_remaining')
+    .eq('client_id', clientId)
+    .eq('status', 'active')
+    .maybeSingle()
+
+  if (sub && sub.classes_remaining > 0 && sub.classes_remaining < 9999) {
+    await supabase
+      .from('subscriptions')
+      .update({ classes_remaining: sub.classes_remaining - 1 })
+      .eq('id', sub.id)
   }
 
   revalidatePath('/admin/bookings')

@@ -11,7 +11,7 @@ export type BlockData = {
   end_time: string
   max_capacity: number
   current_count: number
-  clients: { id: string; full_name: string }[]
+  clients: { id: string; full_name: string; bookingId: string }[]
 }
 
 export default async function AdminBookingsPage({ searchParams }: Props) {
@@ -44,22 +44,23 @@ export default async function AdminBookingsPage({ searchParams }: Props) {
   const { data: rawBookings } = blockIds.length
     ? await supabase
         .from('bookings')
-        .select('time_block_id, client:profiles!bookings_client_id_fkey(id, full_name)')
+        .select('id, time_block_id, client:profiles!bookings_client_id_fkey(id, full_name)')
         .eq('status', 'approved')
         .in('time_block_id', blockIds)
     : { data: [] }
 
   type RawBooking = {
+    id: string
     time_block_id: string
     client: { id: string; full_name: string } | { id: string; full_name: string }[] | null
   }
 
-  const clientsByBlock = new Map<string, { id: string; full_name: string }[]>()
+  const clientsByBlock = new Map<string, { id: string; full_name: string; bookingId: string }[]>()
   for (const b of (rawBookings as RawBooking[]) ?? []) {
     const c = Array.isArray(b.client) ? b.client[0] : b.client
     if (c) {
       const list = clientsByBlock.get(b.time_block_id) ?? []
-      list.push(c)
+      list.push({ ...c, bookingId: b.id })
       clientsByBlock.set(b.time_block_id, list)
     }
   }

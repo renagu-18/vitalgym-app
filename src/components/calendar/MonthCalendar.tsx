@@ -16,7 +16,10 @@ interface Props {
   month: string   // YYYY-MM
   todayKey: string // YYYY-MM-DD
   serverNow: string
+  classesRemaining: number
 }
+
+const NO_CLASSES_MSG = 'No tienes clases disponibles en tu plan actual. Contáctanos para renovar.'
 
 const TZ = 'America/Santiago'
 const DAY_ABBREVS = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do']
@@ -95,7 +98,7 @@ function getDayDot(
   return null
 }
 
-export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey, serverNow }: Props) {
+export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey, serverNow, classesRemaining }: Props) {
   const router = useRouter()
   const [navPending, startNav] = useTransition()
   const defaultDay = todayKey.startsWith(month) ? todayKey : null
@@ -103,6 +106,7 @@ export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey,
   const [selectedBlock, setSelectedBlock] = useState<TimeBlock | null>(null)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const canBook = classesRemaining > 0
 
   const now = new Date(serverNow)
   const bookingMap = new Map(myBookings.map(b => [b.time_block_id, b]))
@@ -158,6 +162,12 @@ export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey,
           <button onClick={() => setErrorMsg(null)}>
             <X size={14} className="text-red-400 mt-0.5" />
           </button>
+        </div>
+      )}
+
+      {!canBook && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+          <p className="text-sm text-amber-800">{NO_CLASSES_MSG}</p>
         </div>
       )}
 
@@ -299,6 +309,7 @@ export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey,
                     status={status}
                     spots={spots}
                     isLoading={isLoading}
+                    canBook={canBook}
                     onBook={() => setSelectedBlock(block)}
                     onCancel={myBk ? () => handleCancel(myBk.id) : undefined}
                   />
@@ -341,12 +352,13 @@ const SLOT_STYLE: Record<BlockStatus, {
 }
 
 function SlotCard({
-  block, status, spots, isLoading, onBook, onCancel,
+  block, status, spots, isLoading, canBook, onBook, onCancel,
 }: {
   block: TimeBlock
   status: BlockStatus
   spots: number
   isLoading: boolean
+  canBook: boolean
   onBook: () => void
   onCancel?: () => void
 }) {
@@ -371,10 +383,11 @@ function SlotCard({
         {status === 'available' && (
           <button
             onClick={onBook}
-            disabled={isLoading}
+            disabled={isLoading || !canBook}
+            title={canBook ? undefined : NO_CLASSES_MSG}
             className="px-4 py-2 bg-brand text-white text-xs font-bold rounded-xl hover:bg-brand-dark disabled:opacity-50 transition-colors shadow-sm shadow-brand/20"
           >
-            {isLoading ? <Loader2 size={12} className="animate-spin" /> : 'Reservar'}
+            {isLoading ? <Loader2 size={12} className="animate-spin" /> : canBook ? 'Reservar' : 'Sin clases'}
           </button>
         )}
         {(status === 'my-pending' || status === 'my-approved') && onCancel && (
@@ -425,7 +438,7 @@ function BookingModal({
         </p>
 
         <p className="text-xs text-gray-400 mt-4 mb-6 leading-relaxed">
-          Se descontará una clase de tu suscripción. Recibirás una notificación de confirmación.
+          La clase se descuenta de tu plan una vez dictada. Recibirás una notificación de confirmación.
         </p>
 
         <div className="flex gap-3">

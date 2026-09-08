@@ -230,7 +230,7 @@ CREATE TABLE public.bookings (
   client_id        uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   time_block_id    uuid NOT NULL REFERENCES public.time_blocks(id) ON DELETE CASCADE,
   status           text NOT NULL DEFAULT 'pending'
-                   CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled')),
+                   CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'completed')),
   rejection_reason text,
   notified_at      timestamptz,
   reminder_sent    boolean NOT NULL DEFAULT false,
@@ -278,6 +278,45 @@ CREATE TRIGGER bookings_sync_count
 CREATE TRIGGER bookings_sync_count_insert
   AFTER INSERT ON public.bookings
   FOR EACH ROW EXECUTE FUNCTION sync_block_count();
+
+-- Función: completa automáticamente las reservas 'approved' cuyo bloque horario ya pasó, y
+-- recién en ese momento descuenta 1 clase de la suscripción activa del cliente. El descuento
+-- ya NO ocurre al reservar ni al aprobar (ver requestBooking/approveBooking) — solo cuando la
+-- clase efectivamente ocurrió o un admin la marca completada a mano (completeBooking). Pensada
+-- para correr periódicamente vía pg_cron, mismo patrón que monthly_classes_reset.
+CREATE OR REPLACE FUNCTION public.complete_past_bookings()
+RETURNS int AS $$
+DECLARE
+  v_count int := 0;
+  b RECORD;
+BEGIN
+  FOR b IN
+    SELECT bk.id, bk.client_id
+    FROM public.bookings bk
+    JOIN public.time_blocks tb ON tb.id = bk.time_block_id
+    WHERE bk.status = 'approved'
+      AND tb.start_time <= now()
+  LOOP
+    UPDATE public.bookings
+    SET status = 'completed', updated_at = now()
+    WHERE id = b.id;
+
+    UPDATE public.subscriptions
+    SET classes_remaining = classes_remaining - 1
+    WHERE client_id = b.client_id
+      AND status = 'active'
+      AND classes_remaining > 0
+      AND classes_remaining < 9999; -- planes ilimitados no se tocan
+
+    v_count := v_count + 1;
+  END LOOP;
+
+  RETURN v_count;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Para activar el cron en Supabase (requiere pg_cron habilitado), cada 5 minutos:
+-- SELECT cron.schedule('complete-past-bookings', '*/5 * * * *', 'SELECT complete_past_bookings()');
 
 -- Función: reserva un cupo de forma atómica. Bloquea la fila del bloque (SELECT ... FOR UPDATE)
 -- para serializar solicitudes concurrentes sobre el mismo horario, valida el cupo con el dato

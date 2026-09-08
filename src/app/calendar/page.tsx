@@ -32,13 +32,21 @@ export default async function CalendarPage({
   const monthStart = new Date(year, month, 1)
   const monthEnd = new Date(year, month + 1, 0, 23, 59, 59)
 
-  const { data: timeBlocks } = await supabase
-    .from('time_blocks')
-    .select('*')
-    .eq('is_active', true)
-    .gte('start_time', monthStart.toISOString())
-    .lte('start_time', monthEnd.toISOString())
-    .order('start_time')
+  const [{ data: timeBlocks }, { data: sub }] = await Promise.all([
+    supabase
+      .from('time_blocks')
+      .select('*')
+      .eq('is_active', true)
+      .gte('start_time', monthStart.toISOString())
+      .lte('start_time', monthEnd.toISOString())
+      .order('start_time'),
+    supabase
+      .from('subscriptions')
+      .select('classes_remaining')
+      .eq('client_id', user.id)
+      .eq('status', 'active')
+      .maybeSingle(),
+  ])
 
   const blockIds = (timeBlocks ?? []).map(b => b.id)
 
@@ -60,6 +68,7 @@ export default async function CalendarPage({
       month={monthStr}
       todayKey={todayKey}
       serverNow={new Date().toISOString()}
+      classesRemaining={sub?.classes_remaining ?? 0}
     />
   )
 }

@@ -35,7 +35,6 @@ export async function createSubscription(data: {
   clientId: string
   planId: string
   startDate: string
-  endDate: string
   classesRemaining: number
 }) {
   const { supabase, error } = await verifyAdmin()
@@ -48,11 +47,13 @@ export async function createSubscription(data: {
     .eq('client_id', data.clientId)
     .eq('status', 'active')
 
+  // end_date lo calcula el trigger subscriptions_set_end_date (start_date + 3 meses); no se
+  // envía acá. Al insertar, el trigger subscriptions_generate_payments crea además los 3 pagos
+  // mensuales pendientes correspondientes.
   const { error: insertErr } = await supabase.from('subscriptions').insert({
     client_id: data.clientId,
     plan_id: data.planId,
     start_date: data.startDate,
-    end_date: data.endDate,
     classes_remaining: data.classesRemaining,
     status: 'active',
   })

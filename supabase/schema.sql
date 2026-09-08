@@ -120,6 +120,20 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE INDEX idx_subscriptions_client ON public.subscriptions(client_id);
 CREATE INDEX idx_subscriptions_status ON public.subscriptions(status);
 
+-- Trigger: end_date siempre es start_date + 3 meses, calculado por la base de datos.
+-- Ignora cualquier valor de end_date que venga en el INSERT (el admin ya no lo ingresa a mano).
+CREATE OR REPLACE FUNCTION public.set_subscription_end_date()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.end_date := (NEW.start_date + interval '3 months')::date;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER subscriptions_set_end_date
+  BEFORE INSERT ON public.subscriptions
+  FOR EACH ROW EXECUTE FUNCTION set_subscription_end_date();
+
 
 -- ─────────────────────────────────────────
 -- 4. PAGOS
@@ -138,6 +152,34 @@ CREATE TABLE public.payments (
 
 CREATE INDEX idx_payments_client ON public.payments(client_id);
 CREATE INDEX idx_payments_status ON public.payments(status);
+
+-- Trigger: al crear una suscripción, genera automáticamente los 3 pagos mensuales
+-- correspondientes (mismo monto que el precio del plan, uno por cada mes que cubre la
+-- suscripción). SECURITY DEFINER para no depender de que quien inserte en subscriptions
+-- tenga además permiso de INSERT directo sobre payments.
+CREATE OR REPLACE FUNCTION public.generate_subscription_payments()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_price int;
+BEGIN
+  SELECT price_monthly INTO v_price FROM public.plans WHERE id = NEW.plan_id;
+
+  INSERT INTO public.payments (client_id, subscription_id, amount, month, status, notes)
+  VALUES
+    (NEW.client_id, NEW.id, v_price, NEW.start_date, 'pending',
+      'Generado automáticamente al crear suscripción'),
+    (NEW.client_id, NEW.id, v_price, (NEW.start_date + interval '1 month')::date, 'pending',
+      'Generado automáticamente al crear suscripción'),
+    (NEW.client_id, NEW.id, v_price, (NEW.start_date + interval '2 months')::date, 'pending',
+      'Generado automáticamente al crear suscripción');
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER subscriptions_generate_payments
+  AFTER INSERT ON public.subscriptions
+  FOR EACH ROW EXECUTE FUNCTION generate_subscription_payments();
 
 
 -- ─────────────────────────────────────────

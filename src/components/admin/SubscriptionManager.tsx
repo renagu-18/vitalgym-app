@@ -38,10 +38,8 @@ export default function SubscriptionManager({ clientId, subscription, plans }: P
 
   // Form para nueva suscripción
   const today = new Date().toISOString().split('T')[0]
-  const inThreeMonths = new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0]
   const [planId, setPlanId] = useState(plans[0]?.id ?? '')
   const [startDate, setStartDate] = useState(today)
-  const [endDate, setEndDate] = useState(inThreeMonths)
 
   // Edición de la suscripción activa
   const [classes, setClasses] = useState(subscription?.classes_remaining ?? 0)
@@ -65,7 +63,6 @@ export default function SubscriptionManager({ clientId, subscription, plans }: P
       clientId,
       planId,
       startDate,
-      endDate,
       classesRemaining: selectedPlan?.classes_per_month ?? 0,
     }).then(r => { if (!r.error) setShowNew(false); return r }))
   }
@@ -113,25 +110,19 @@ export default function SubscriptionManager({ clientId, subscription, plans }: P
               ))}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Inicio</label>
-              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm
-                           focus:outline-none focus:ring-2 focus:ring-brand" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">Fin</label>
-              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm
-                           focus:outline-none focus:ring-2 focus:ring-brand" />
-            </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Inicio</label>
+            <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm
+                         focus:outline-none focus:ring-2 focus:ring-brand" />
           </div>
           {selectedPlan && (
             <p className="text-xs text-gray-400">
               {selectedPlan.classes_per_month >= 9999
                 ? 'Free pass con clases ilimitadas y sin costo.'
                 : `Se asignarán ${selectedPlan.classes_per_month} clases al mes automáticamente.`}
+              {' '}Vence automáticamente 3 meses después del inicio, y se generan 3 pagos
+              mensuales pendientes de ${selectedPlan.price_monthly.toLocaleString('es-CL')} cada uno.
             </p>
           )}
           <div className="flex gap-2">

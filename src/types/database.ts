@@ -79,7 +79,7 @@ export type Database = {
           client_id: string
           plan_id: string
           start_date: string
-          end_date: string
+          end_date?: string // la calcula el trigger subscriptions_set_end_date (start_date + 3 meses)
           status?: 'active' | 'paused' | 'expired'
           classes_remaining: number
           reset_day?: number

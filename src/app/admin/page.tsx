@@ -1,6 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import { Users, CalendarDays, Dumbbell, Ruler, CreditCard, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
+import TodayPanel, { type TodayEntry } from '@/components/admin/TodayPanel'
+
+const TZ = 'America/Santiago'
+
+function dayKey(iso: string) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: TZ })
+}
 
 export default async function AdminDashboardPage() {
   const supabase = await createClient()
@@ -27,6 +34,113 @@ export default async function AdminDashboardPage() {
   ])
 
   const pendingPay = pendingPayments ?? 0
+
+  // ── Vista "Hoy" ──────────────────────────────────────────────────────────
+  // Ventana amplia en UTC (±1 día) para no perder bloques por el offset de zona horaria;
+  // el filtro exacto por día se hace abajo comparando dayKey(start_time) === todayKey
+  // (mismo patrón que MonthCalendar/WeeklyCalendar).
+  const todayKey = new Date(new Date().toLocaleString('en-US', { timeZone: TZ }))
+    .toLocaleDateString('en-CA', { timeZone: TZ })
+  const wideStart = new Date(Date.now() - 24 * 3600 * 1000).toISOString()
+  const wideEnd = new Date(Date.now() + 24 * 3600 * 1000).toISOString()
+
+  type RawTodayBooking = {
+    id: string
+    client: { id: string; full_name: string } | { id: string; full_name: string }[] | null
+    time_blocks: { id: string; start_time: string; end_time: string }
+      | { id: string; start_time: string; end_time: string }[] | null
+  }
+
+  const { data: rawTodayBookings } = await supabase
+    .from('bookings')
+    .select(`
+      id,
+      client:profiles!bookings_client_id_fkey(id, full_name),
+      time_blocks!inner(id, start_time, end_time)
+    `)
+    .eq('status', 'approved')
+    .gte('time_blocks.start_time', wideStart)
+    .lte('time_blocks.start_time', wideEnd)
+
+  const todaySlots = ((rawTodayBookings as RawTodayBooking[] | null) ?? [])
+    .map(b => {
+      const client = Array.isArray(b.client) ? b.client[0] : b.client
+      const block = Array.isArray(b.time_blocks) ? b.time_blocks[0] : b.time_blocks
+      return client && block ? { bookingId: b.id, client, block } : null
+    })
+    .filter((x): x is { bookingId: string; client: { id: string; full_name: string }; block: { id: string; start_time: string; end_time: string } } => x !== null)
+    .filter(x => dayKey(x.block.start_time) === todayKey)
+    .sort((a, b) => a.block.start_time.localeCompare(b.block.start_time))
+
+  const todayClientIds = Array.from(new Set(todaySlots.map(s => s.client.id)))
+
+  const { data: allRoutinesRaw } = todayClientIds.length
+    ? await supabase
+        .from('routines')
+        .select('id, client_id, name, is_active, description')
+        .in('client_id', todayClientIds)
+        .order('created_at', { ascending: false })
+    : { data: [] }
+
+  const { data: logsRaw } = todayClientIds.length
+    ? await supabase
+        .from('training_logs')
+        .select(`
+          id, client_id, log_date, notes,
+          exercise_logs(id, exercise_name, sets_done, reps_done, weight_used, notes)
+        `)
+        .in('client_id', todayClientIds)
+        .order('log_date', { ascending: false })
+    : { data: [] }
+
+  const routineIds = (allRoutinesRaw ?? []).map(r => r.id)
+  const { data: exercisesRaw } = routineIds.length
+    ? await supabase.from('exercises').select('*').in('routine_id', routineIds).order('order_index')
+    : { data: [] }
+
+  const exercisesByRoutine = new Map<string, NonNullable<typeof exercisesRaw>>()
+  for (const ex of exercisesRaw ?? []) {
+    const list = exercisesByRoutine.get(ex.routine_id) ?? []
+    list.push(ex)
+    exercisesByRoutine.set(ex.routine_id, list)
+  }
+
+  const routinesByClient = new Map<string, NonNullable<typeof allRoutinesRaw>>()
+  for (const r of allRoutinesRaw ?? []) {
+    const list = routinesByClient.get(r.client_id) ?? []
+    list.push(r)
+    routinesByClient.set(r.client_id, list)
+  }
+
+  const lastSessionByClient = new Map<string, NonNullable<typeof logsRaw>[number]>()
+  for (const log of logsRaw ?? []) {
+    if (!lastSessionByClient.has(log.client_id)) lastSessionByClient.set(log.client_id, log)
+  }
+
+  const todayEntries: TodayEntry[] = todaySlots.map(slot => {
+    const clientRoutines = routinesByClient.get(slot.client.id) ?? []
+    const active = clientRoutines.find(r => r.is_active) ?? null
+    const lastLog = lastSessionByClient.get(slot.client.id) ?? null
+
+    return {
+      bookingId: slot.bookingId,
+      blockStart: slot.block.start_time,
+      blockEnd: slot.block.end_time,
+      client: slot.client,
+      allRoutines: clientRoutines.map(r => ({ id: r.id, name: r.name, is_active: r.is_active })),
+      routine: active
+        ? {
+            id: active.id,
+            name: active.name,
+            description: active.description,
+            exercises: exercisesByRoutine.get(active.id) ?? [],
+          }
+        : null,
+      lastSession: lastLog
+        ? { date: lastLog.log_date, notes: lastLog.notes, exercises: lastLog.exercise_logs ?? [] }
+        : null,
+    }
+  })
 
   const quickActions = [
     {
@@ -99,6 +213,9 @@ export default async function AdminDashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Vista Hoy ────────────────────────────────────────── */}
+      <TodayPanel entries={todayEntries} />
 
       {/* ── Alerta pagos ──────────────────────────────────────── */}
       {pendingPay > 0 && (

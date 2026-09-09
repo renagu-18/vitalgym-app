@@ -126,15 +126,18 @@ export default async function AdminDashboardPage() {
     routinesByClient.set(r.client_id, list)
   }
 
-  const lastSessionByClient = new Map<string, LogRow>()
+  // logsRaw ya viene ordenado log_date desc; nos quedamos con las últimas 3 sesiones por cliente.
+  const lastSessionsByClient = new Map<string, LogRow[]>()
   for (const log of logsRaw) {
-    if (!lastSessionByClient.has(log.client_id)) lastSessionByClient.set(log.client_id, log)
+    const list = lastSessionsByClient.get(log.client_id) ?? []
+    if (list.length < 3) list.push(log)
+    lastSessionsByClient.set(log.client_id, list)
   }
 
   const todayEntries: TodayEntry[] = todaySlots.map(slot => {
     const clientRoutines = routinesByClient.get(slot.client.id) ?? []
     const active = clientRoutines.find(r => r.is_active) ?? null
-    const lastLog = lastSessionByClient.get(slot.client.id) ?? null
+    const lastLogs = lastSessionsByClient.get(slot.client.id) ?? []
 
     return {
       bookingId: slot.bookingId,
@@ -150,9 +153,11 @@ export default async function AdminDashboardPage() {
             exercises: exercisesByRoutine.get(active.id) ?? [],
           }
         : null,
-      lastSession: lastLog
-        ? { date: lastLog.log_date, notes: lastLog.notes, exercises: lastLog.exercise_logs ?? [] }
-        : null,
+      lastSessions: lastLogs.map(log => ({
+        date: log.log_date,
+        notes: log.notes,
+        exercises: log.exercise_logs ?? [],
+      })),
     }
   })
 

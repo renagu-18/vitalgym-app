@@ -37,11 +37,11 @@ export interface TodayEntry {
     description: string | null
     exercises: ExerciseData[]
   } | null
-  lastSession: {
+  lastSessions: {
     date: string
     notes: string | null
     exercises: LastSessionExercise[]
-  } | null
+  }[]
 }
 
 interface Props {
@@ -141,7 +141,7 @@ export default function TodayPanel({ entries }: Props) {
                 className={`flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold py-2 rounded-lg transition-colors
                   ${tab === 'history' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
               >
-                <History size={13} /> Última sesión
+                <History size={13} /> Últimas sesiones
               </button>
             </div>
 
@@ -154,7 +154,7 @@ export default function TodayPanel({ entries }: Props) {
                   allRoutines={selected.allRoutines}
                 />
               ) : (
-                <LastSessionView session={selected.lastSession} />
+                <LastSessionsView sessions={selected.lastSessions} />
               )}
             </div>
           </div>
@@ -164,8 +164,8 @@ export default function TodayPanel({ entries }: Props) {
   )
 }
 
-function LastSessionView({ session }: { session: TodayEntry['lastSession'] }) {
-  if (!session) {
+function LastSessionsView({ sessions }: { sessions: TodayEntry['lastSessions'] }) {
+  if (sessions.length === 0) {
     return (
       <div className="bg-white border border-dashed border-gray-200 rounded-xl p-8 text-center">
         <p className="text-sm text-gray-400">Aún no hay sesiones registradas.</p>
@@ -174,31 +174,35 @@ function LastSessionView({ session }: { session: TodayEntry['lastSession'] }) {
   }
 
   return (
-    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-      <div className="px-4 py-3 border-b border-gray-50">
-        <p className="text-sm font-semibold text-gray-900 capitalize">{fmtDate(session.date)}</p>
-      </div>
-      {session.exercises.length > 0 ? (
-        <div className="divide-y divide-gray-50">
-          {session.exercises.map(ex => (
-            <div key={ex.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
-              <p className="text-sm text-gray-700 font-medium flex-1 min-w-0 truncate">{ex.exercise_name}</p>
-              <p className="text-xs text-gray-400 flex-shrink-0 text-right">
-                {[
-                  ex.sets_done && `${ex.sets_done} series`,
-                  ex.reps_done && `× ${ex.reps_done}`,
-                  ex.weight_used && `· ${ex.weight_used}`,
-                ].filter(Boolean).join(' ') || '—'}
-              </p>
+    <div className="space-y-3">
+      {sessions.map((session, i) => (
+        <div key={i} className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-50">
+            <p className="text-sm font-semibold text-gray-900 capitalize">{fmtDate(session.date)}</p>
+          </div>
+          {session.exercises.length > 0 ? (
+            <div className="divide-y divide-gray-50">
+              {session.exercises.map(ex => (
+                <div key={ex.id} className="px-4 py-2.5 flex items-center justify-between gap-2">
+                  <p className="text-sm text-gray-700 font-medium flex-1 min-w-0 truncate">{ex.exercise_name}</p>
+                  <p className="text-xs text-gray-400 flex-shrink-0 text-right">
+                    {[
+                      ex.sets_done && `${ex.sets_done} series`,
+                      ex.reps_done && `× ${ex.reps_done}`,
+                      ex.weight_used && `· ${ex.weight_used}`,
+                    ].filter(Boolean).join(' ') || '—'}
+                  </p>
+                </div>
+              ))}
             </div>
-          ))}
+          ) : (
+            <p className="px-4 py-3 text-sm text-gray-400">Sin ejercicios registrados en esa sesión.</p>
+          )}
+          {session.notes && (
+            <p className="px-4 py-2 text-xs text-gray-400 italic border-t border-gray-50">{session.notes}</p>
+          )}
         </div>
-      ) : (
-        <p className="px-4 py-3 text-sm text-gray-400">Sin ejercicios registrados en esa sesión.</p>
-      )}
-      {session.notes && (
-        <p className="px-4 py-2 text-xs text-gray-400 italic border-t border-gray-50">{session.notes}</p>
-      )}
+      ))}
     </div>
   )
 }

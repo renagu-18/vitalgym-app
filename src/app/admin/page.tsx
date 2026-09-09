@@ -74,15 +74,27 @@ export default async function AdminDashboardPage() {
 
   const todayClientIds = Array.from(new Set(todaySlots.map(s => s.client.id)))
 
-  const { data: allRoutinesRaw } = todayClientIds.length
+  type RoutineRow = { id: string; client_id: string; name: string; is_active: boolean; description: string | null }
+  type ExerciseRow = {
+    id: string; routine_id: string; name: string; sets: number | null
+    reps: string | null; suggested_weight: string | null; notes: string | null; order_index: number
+  }
+  type LogExercise = {
+    id: string; exercise_name: string; sets_done: number | null
+    reps_done: string | null; weight_used: string | null; notes: string | null
+  }
+  type LogRow = { id: string; client_id: string; log_date: string; notes: string | null; exercise_logs: LogExercise[] | null }
+
+  const { data: allRoutinesRawData } = todayClientIds.length
     ? await supabase
         .from('routines')
         .select('id, client_id, name, is_active, description')
         .in('client_id', todayClientIds)
         .order('created_at', { ascending: false })
     : { data: [] }
+  const allRoutinesRaw = (allRoutinesRawData as RoutineRow[] | null) ?? []
 
-  const { data: logsRaw } = todayClientIds.length
+  const { data: logsRawData } = todayClientIds.length
     ? await supabase
         .from('training_logs')
         .select(`
@@ -92,28 +104,30 @@ export default async function AdminDashboardPage() {
         .in('client_id', todayClientIds)
         .order('log_date', { ascending: false })
     : { data: [] }
+  const logsRaw = (logsRawData as LogRow[] | null) ?? []
 
-  const routineIds = (allRoutinesRaw ?? []).map(r => r.id)
-  const { data: exercisesRaw } = routineIds.length
+  const routineIds = allRoutinesRaw.map(r => r.id)
+  const { data: exercisesRawData } = routineIds.length
     ? await supabase.from('exercises').select('*').in('routine_id', routineIds).order('order_index')
     : { data: [] }
+  const exercisesRaw = (exercisesRawData as ExerciseRow[] | null) ?? []
 
-  const exercisesByRoutine = new Map<string, NonNullable<typeof exercisesRaw>>()
-  for (const ex of exercisesRaw ?? []) {
+  const exercisesByRoutine = new Map<string, ExerciseRow[]>()
+  for (const ex of exercisesRaw) {
     const list = exercisesByRoutine.get(ex.routine_id) ?? []
     list.push(ex)
     exercisesByRoutine.set(ex.routine_id, list)
   }
 
-  const routinesByClient = new Map<string, NonNullable<typeof allRoutinesRaw>>()
-  for (const r of allRoutinesRaw ?? []) {
+  const routinesByClient = new Map<string, RoutineRow[]>()
+  for (const r of allRoutinesRaw) {
     const list = routinesByClient.get(r.client_id) ?? []
     list.push(r)
     routinesByClient.set(r.client_id, list)
   }
 
-  const lastSessionByClient = new Map<string, NonNullable<typeof logsRaw>[number]>()
-  for (const log of logsRaw ?? []) {
+  const lastSessionByClient = new Map<string, LogRow>()
+  for (const log of logsRaw) {
     if (!lastSessionByClient.has(log.client_id)) lastSessionByClient.set(log.client_id, log)
   }
 

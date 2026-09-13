@@ -466,11 +466,13 @@ CREATE TABLE public.measurements (
   weight_kg      numeric(5,2),
   height_cm      numeric(5,1),
   body_fat_pct   numeric(5,2),
-  waist_cm       numeric(5,1),
-  hip_cm         numeric(5,1),
-  chest_cm       numeric(5,1),
-  arms_cm        numeric(5,1),
-  legs_cm        numeric(5,1),
+  biceps_cm      numeric(5,1),
+  triceps_cm     numeric(5,1),
+  escapular_cm   numeric(5,1),
+  abdominal_cm   numeric(5,1),
+  suprailiaco_cm numeric(5,1),
+  cuadricep_cm   numeric(5,1),
+  pantorrilla_cm numeric(5,1),
   notes          text,
   created_at     timestamptz NOT NULL DEFAULT now()
 );

@@ -376,11 +376,13 @@ export type Database = {
           weight_kg: number | null
           height_cm: number | null
           body_fat_pct: number | null
-          waist_cm: number | null
-          hip_cm: number | null
-          chest_cm: number | null
-          arms_cm: number | null
-          legs_cm: number | null
+          biceps_cm: number | null
+          triceps_cm: number | null
+          escapular_cm: number | null
+          abdominal_cm: number | null
+          suprailiaco_cm: number | null
+          cuadricep_cm: number | null
+          pantorrilla_cm: number | null
           notes: string | null
           created_at: string
         }
@@ -391,11 +393,13 @@ export type Database = {
           weight_kg?: number | null
           height_cm?: number | null
           body_fat_pct?: number | null
-          waist_cm?: number | null
-          hip_cm?: number | null
-          chest_cm?: number | null
-          arms_cm?: number | null
-          legs_cm?: number | null
+          biceps_cm?: number | null
+          triceps_cm?: number | null
+          escapular_cm?: number | null
+          abdominal_cm?: number | null
+          suprailiaco_cm?: number | null
+          cuadricep_cm?: number | null
+          pantorrilla_cm?: number | null
           notes?: string | null
           created_at?: string
         }
@@ -404,11 +408,13 @@ export type Database = {
           weight_kg?: number | null
           height_cm?: number | null
           body_fat_pct?: number | null
-          waist_cm?: number | null
-          hip_cm?: number | null
-          chest_cm?: number | null
-          arms_cm?: number | null
-          legs_cm?: number | null
+          biceps_cm?: number | null
+          triceps_cm?: number | null
+          escapular_cm?: number | null
+          abdominal_cm?: number | null
+          suprailiaco_cm?: number | null
+          cuadricep_cm?: number | null
+          pantorrilla_cm?: number | null
           notes?: string | null
         }
         Relationships: [

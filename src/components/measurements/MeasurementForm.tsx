@@ -9,17 +9,19 @@ interface Props {
   clientId: string
 }
 
-type FieldKey = 'weight_kg' | 'height_cm' | 'body_fat_pct' | 'waist_cm' | 'hip_cm' | 'chest_cm' | 'arms_cm' | 'legs_cm'
+type FieldKey = 'weight_kg' | 'height_cm' | 'body_fat_pct' | 'biceps_cm' | 'triceps_cm' | 'escapular_cm' | 'abdominal_cm' | 'suprailiaco_cm' | 'cuadricep_cm' | 'pantorrilla_cm'
 
 const FIELDS: { key: FieldKey; label: string; unit: string }[] = [
   { key: 'weight_kg', label: 'Peso', unit: 'kg' },
   { key: 'height_cm', label: 'Talla', unit: 'cm' },
   { key: 'body_fat_pct', label: '% Grasa', unit: '%' },
-  { key: 'waist_cm', label: 'Cintura', unit: 'cm' },
-  { key: 'hip_cm', label: 'Cadera', unit: 'cm' },
-  { key: 'chest_cm', label: 'Pecho', unit: 'cm' },
-  { key: 'arms_cm', label: 'Brazos', unit: 'cm' },
-  { key: 'legs_cm', label: 'Piernas', unit: 'cm' },
+  { key: 'biceps_cm', label: 'Bíceps', unit: 'cm' },
+  { key: 'triceps_cm', label: 'Tríceps', unit: 'cm' },
+  { key: 'escapular_cm', label: 'Escapular', unit: 'cm' },
+  { key: 'abdominal_cm', label: 'Abdominal', unit: 'cm' },
+  { key: 'suprailiaco_cm', label: 'Suprailiaco', unit: 'cm' },
+  { key: 'cuadricep_cm', label: 'Cuadrícep', unit: 'cm' },
+  { key: 'pantorrilla_cm', label: 'Pantorrilla', unit: 'cm' },
 ]
 
 export default function MeasurementForm({ clientId }: Props) {
@@ -43,11 +45,13 @@ export default function MeasurementForm({ clientId }: Props) {
         weight_kg: values.weight_kg ? parseFloat(values.weight_kg) : null,
         height_cm: values.height_cm ? parseFloat(values.height_cm) : null,
         body_fat_pct: values.body_fat_pct ? parseFloat(values.body_fat_pct) : null,
-        waist_cm: values.waist_cm ? parseFloat(values.waist_cm) : null,
-        hip_cm: values.hip_cm ? parseFloat(values.hip_cm) : null,
-        chest_cm: values.chest_cm ? parseFloat(values.chest_cm) : null,
-        arms_cm: values.arms_cm ? parseFloat(values.arms_cm) : null,
-        legs_cm: values.legs_cm ? parseFloat(values.legs_cm) : null,
+        biceps_cm: values.biceps_cm ? parseFloat(values.biceps_cm) : null,
+        triceps_cm: values.triceps_cm ? parseFloat(values.triceps_cm) : null,
+        escapular_cm: values.escapular_cm ? parseFloat(values.escapular_cm) : null,
+        abdominal_cm: values.abdominal_cm ? parseFloat(values.abdominal_cm) : null,
+        suprailiaco_cm: values.suprailiaco_cm ? parseFloat(values.suprailiaco_cm) : null,
+        cuadricep_cm: values.cuadricep_cm ? parseFloat(values.cuadricep_cm) : null,
+        pantorrilla_cm: values.pantorrilla_cm ? parseFloat(values.pantorrilla_cm) : null,
         notes: notes.trim() || null,
       }
       const res = await createMeasurement(clientId, data)

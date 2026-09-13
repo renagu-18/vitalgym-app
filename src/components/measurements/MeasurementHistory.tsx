@@ -12,11 +12,13 @@ type Measurement = {
   weight_kg: number | null
   height_cm: number | null
   body_fat_pct: number | null
-  waist_cm: number | null
-  hip_cm: number | null
-  chest_cm: number | null
-  arms_cm: number | null
-  legs_cm: number | null
+  biceps_cm: number | null
+  triceps_cm: number | null
+  escapular_cm: number | null
+  abdominal_cm: number | null
+  suprailiaco_cm: number | null
+  cuadricep_cm: number | null
+  pantorrilla_cm: number | null
   notes: string | null
   created_at: string
 }
@@ -50,12 +52,15 @@ function MiniLineChart({ data, color }: { data: number[]; color: string }) {
 
 const METRIC_LABELS: { key: keyof Measurement; label: string; unit: string }[] = [
   { key: 'weight_kg', label: 'Peso', unit: 'kg' },
+  { key: 'height_cm', label: 'Talla', unit: 'cm' },
   { key: 'body_fat_pct', label: '% Grasa', unit: '%' },
-  { key: 'waist_cm', label: 'Cintura', unit: 'cm' },
-  { key: 'hip_cm', label: 'Cadera', unit: 'cm' },
-  { key: 'chest_cm', label: 'Pecho', unit: 'cm' },
-  { key: 'arms_cm', label: 'Brazos', unit: 'cm' },
-  { key: 'legs_cm', label: 'Piernas', unit: 'cm' },
+  { key: 'biceps_cm', label: 'Bíceps', unit: 'cm' },
+  { key: 'triceps_cm', label: 'Tríceps', unit: 'cm' },
+  { key: 'escapular_cm', label: 'Escapular', unit: 'cm' },
+  { key: 'abdominal_cm', label: 'Abdominal', unit: 'cm' },
+  { key: 'suprailiaco_cm', label: 'Suprailiaco', unit: 'cm' },
+  { key: 'cuadricep_cm', label: 'Cuadrícep', unit: 'cm' },
+  { key: 'pantorrilla_cm', label: 'Pantorrilla', unit: 'cm' },
 ]
 
 function DeleteButton({ measurementId, clientId }: { measurementId: string; clientId: string }) {
@@ -100,7 +105,11 @@ export default function MeasurementHistory({ measurements, clientId, isAdmin = f
               const latest = vals[vals.length - 1]
               const prev = vals[vals.length - 2]
               const delta = latest - prev
-              const improving = key === 'body_fat_pct' || key === 'waist_cm' || key === 'hip_cm'
+              const lowerIsBetter: (keyof Measurement)[] = [
+                'body_fat_pct', 'biceps_cm', 'triceps_cm', 'escapular_cm', 'abdominal_cm', 'suprailiaco_cm',
+                'cuadricep_cm', 'pantorrilla_cm',
+              ]
+              const improving = lowerIsBetter.includes(key)
                 ? delta < 0
                 : delta > 0
               const color = delta === 0 ? '#9ca3af' : improving ? '#16a34a' : '#dc2626'
@@ -149,13 +158,6 @@ export default function MeasurementHistory({ measurements, clientId, isAdmin = f
                       </div>
                     )
                   })}
-                  {m.height_cm && (
-                    <div className="bg-gray-50 rounded p-1.5 text-center">
-                      <p className="text-xs font-semibold text-gray-800">{m.height_cm}</p>
-                      <p className="text-[10px] text-gray-400">Talla</p>
-                      <p className="text-[9px] text-gray-300">cm</p>
-                    </div>
-                  )}
                 </div>
                 {m.notes && <p className="mt-2 text-xs text-gray-400 italic">{m.notes}</p>}
               </div>

@@ -9,7 +9,7 @@ interface Props {
   clientId: string
 }
 
-type FieldKey = 'weight_kg' | 'height_cm' | 'body_fat_pct' | 'biceps_mm' | 'triceps_mm' | 'escapular_mm' | 'abdominal_mm' | 'suprailiaco_mm' | 'cuadricep_mm' | 'pantorrilla_mm'
+type FieldKey = 'weight_kg' | 'height_cm' | 'body_fat_pct' | 'biceps_mm' | 'triceps_mm' | 'subescapular_mm' | 'abdominal_mm' | 'suprailiaco_mm' | 'cuadricep_mm' | 'pantorrilla_mm'
 
 const FIELDS: { key: FieldKey; label: string; unit: string }[] = [
   { key: 'weight_kg', label: 'Peso', unit: 'kg' },
@@ -17,7 +17,7 @@ const FIELDS: { key: FieldKey; label: string; unit: string }[] = [
   { key: 'body_fat_pct', label: '% Grasa', unit: '%' },
   { key: 'biceps_mm', label: 'Bíceps', unit: 'mm' },
   { key: 'triceps_mm', label: 'Tríceps', unit: 'mm' },
-  { key: 'escapular_mm', label: 'Escapular', unit: 'mm' },
+  { key: 'subescapular_mm', label: 'Subescapular', unit: 'mm' },
   { key: 'abdominal_mm', label: 'Abdominal', unit: 'mm' },
   { key: 'suprailiaco_mm', label: 'Suprailiaco', unit: 'mm' },
   { key: 'cuadricep_mm', label: 'Cuadrícep', unit: 'mm' },
@@ -47,7 +47,7 @@ export default function MeasurementForm({ clientId }: Props) {
         body_fat_pct: values.body_fat_pct ? parseFloat(values.body_fat_pct) : null,
         biceps_mm: values.biceps_mm ? parseFloat(values.biceps_mm) : null,
         triceps_mm: values.triceps_mm ? parseFloat(values.triceps_mm) : null,
-        escapular_mm: values.escapular_mm ? parseFloat(values.escapular_mm) : null,
+        subescapular_mm: values.subescapular_mm ? parseFloat(values.subescapular_mm) : null,
         abdominal_mm: values.abdominal_mm ? parseFloat(values.abdominal_mm) : null,
         suprailiaco_mm: values.suprailiaco_mm ? parseFloat(values.suprailiaco_mm) : null,
         cuadricep_mm: values.cuadricep_mm ? parseFloat(values.cuadricep_mm) : null,

@@ -19,7 +19,7 @@ export async function createMeasurement(clientId: string, data: {
   body_fat_pct: number | null
   biceps_mm: number | null
   triceps_mm: number | null
-  escapular_mm: number | null
+  subescapular_mm: number | null
   abdominal_mm: number | null
   suprailiaco_mm: number | null
   cuadricep_mm: number | null

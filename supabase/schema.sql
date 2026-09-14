@@ -468,7 +468,7 @@ CREATE TABLE public.measurements (
   body_fat_pct   numeric(5,2),
   biceps_mm      numeric(5,1),
   triceps_mm     numeric(5,1),
-  escapular_mm   numeric(5,1),
+  subescapular_mm   numeric(5,1),
   abdominal_mm   numeric(5,1),
   suprailiaco_mm numeric(5,1),
   cuadricep_mm   numeric(5,1),

@@ -14,7 +14,7 @@ type Measurement = {
   body_fat_pct: number | null
   biceps_mm: number | null
   triceps_mm: number | null
-  escapular_mm: number | null
+  subescapular_mm: number | null
   abdominal_mm: number | null
   suprailiaco_mm: number | null
   cuadricep_mm: number | null
@@ -56,7 +56,7 @@ const METRIC_LABELS: { key: keyof Measurement; label: string; unit: string }[] =
   { key: 'body_fat_pct', label: '% Grasa', unit: '%' },
   { key: 'biceps_mm', label: 'Bíceps', unit: 'mm' },
   { key: 'triceps_mm', label: 'Tríceps', unit: 'mm' },
-  { key: 'escapular_mm', label: 'Escapular', unit: 'mm' },
+  { key: 'subescapular_mm', label: 'Subescapular', unit: 'mm' },
   { key: 'abdominal_mm', label: 'Abdominal', unit: 'mm' },
   { key: 'suprailiaco_mm', label: 'Suprailiaco', unit: 'mm' },
   { key: 'cuadricep_mm', label: 'Cuadrícep', unit: 'mm' },
@@ -106,7 +106,7 @@ export default function MeasurementHistory({ measurements, clientId, isAdmin = f
               const prev = vals[vals.length - 2]
               const delta = latest - prev
               const lowerIsBetter: (keyof Measurement)[] = [
-                'body_fat_pct', 'biceps_mm', 'triceps_mm', 'escapular_mm', 'abdominal_mm', 'suprailiaco_mm',
+                'body_fat_pct', 'biceps_mm', 'triceps_mm', 'subescapular_mm', 'abdominal_mm', 'suprailiaco_mm',
                 'cuadricep_mm', 'pantorrilla_mm',
               ]
               const improving = lowerIsBetter.includes(key)

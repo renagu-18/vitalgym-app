@@ -12,13 +12,13 @@ type Measurement = {
   weight_kg: number | null
   height_cm: number | null
   body_fat_pct: number | null
-  biceps_cm: number | null
-  triceps_cm: number | null
-  escapular_cm: number | null
-  abdominal_cm: number | null
-  suprailiaco_cm: number | null
-  cuadricep_cm: number | null
-  pantorrilla_cm: number | null
+  biceps_mm: number | null
+  triceps_mm: number | null
+  escapular_mm: number | null
+  abdominal_mm: number | null
+  suprailiaco_mm: number | null
+  cuadricep_mm: number | null
+  pantorrilla_mm: number | null
   notes: string | null
   created_at: string
 }
@@ -54,13 +54,13 @@ const METRIC_LABELS: { key: keyof Measurement; label: string; unit: string }[] =
   { key: 'weight_kg', label: 'Peso', unit: 'kg' },
   { key: 'height_cm', label: 'Talla', unit: 'cm' },
   { key: 'body_fat_pct', label: '% Grasa', unit: '%' },
-  { key: 'biceps_cm', label: 'Bíceps', unit: 'cm' },
-  { key: 'triceps_cm', label: 'Tríceps', unit: 'cm' },
-  { key: 'escapular_cm', label: 'Escapular', unit: 'cm' },
-  { key: 'abdominal_cm', label: 'Abdominal', unit: 'cm' },
-  { key: 'suprailiaco_cm', label: 'Suprailiaco', unit: 'cm' },
-  { key: 'cuadricep_cm', label: 'Cuadrícep', unit: 'cm' },
-  { key: 'pantorrilla_cm', label: 'Pantorrilla', unit: 'cm' },
+  { key: 'biceps_mm', label: 'Bíceps', unit: 'mm' },
+  { key: 'triceps_mm', label: 'Tríceps', unit: 'mm' },
+  { key: 'escapular_mm', label: 'Escapular', unit: 'mm' },
+  { key: 'abdominal_mm', label: 'Abdominal', unit: 'mm' },
+  { key: 'suprailiaco_mm', label: 'Suprailiaco', unit: 'mm' },
+  { key: 'cuadricep_mm', label: 'Cuadrícep', unit: 'mm' },
+  { key: 'pantorrilla_mm', label: 'Pantorrilla', unit: 'mm' },
 ]
 
 function DeleteButton({ measurementId, clientId }: { measurementId: string; clientId: string }) {
@@ -106,8 +106,8 @@ export default function MeasurementHistory({ measurements, clientId, isAdmin = f
               const prev = vals[vals.length - 2]
               const delta = latest - prev
               const lowerIsBetter: (keyof Measurement)[] = [
-                'body_fat_pct', 'biceps_cm', 'triceps_cm', 'escapular_cm', 'abdominal_cm', 'suprailiaco_cm',
-                'cuadricep_cm', 'pantorrilla_cm',
+                'body_fat_pct', 'biceps_mm', 'triceps_mm', 'escapular_mm', 'abdominal_mm', 'suprailiaco_mm',
+                'cuadricep_mm', 'pantorrilla_mm',
               ]
               const improving = lowerIsBetter.includes(key)
                 ? delta < 0

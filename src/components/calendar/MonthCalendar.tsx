@@ -20,6 +20,8 @@ interface Props {
 }
 
 const NO_CLASSES_MSG = 'No tienes clases disponibles en tu plan actual. Contáctanos para renovar.'
+const CANCEL_CUTOFF_HOURS = 4
+const CANCEL_CUTOFF_MSG = 'Solo puedes cancelar hasta 4 horas antes de la clase'
 
 const TZ = 'America/Santiago'
 const DAY_ABBREVS = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do']
@@ -302,6 +304,8 @@ export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey,
                 const myBk = bookingMap.get(block.id)
                 const spots = block.max_capacity - block.current_count
                 const isLoading = loadingId === block.id || loadingId === myBk?.id
+                const hoursUntil = (new Date(block.start_time).getTime() - now.getTime()) / 3_600_000
+                const canCancel = hoursUntil >= CANCEL_CUTOFF_HOURS
                 return (
                   <SlotCard
                     key={block.id}
@@ -310,6 +314,7 @@ export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey,
                     spots={spots}
                     isLoading={isLoading}
                     canBook={canBook}
+                    canCancel={canCancel}
                     onBook={() => setSelectedBlock(block)}
                     onCancel={myBk ? () => handleCancel(myBk.id) : undefined}
                   />
@@ -352,13 +357,14 @@ const SLOT_STYLE: Record<BlockStatus, {
 }
 
 function SlotCard({
-  block, status, spots, isLoading, canBook, onBook, onCancel,
+  block, status, spots, isLoading, canBook, canCancel, onBook, onCancel,
 }: {
   block: TimeBlock
   status: BlockStatus
   spots: number
   isLoading: boolean
   canBook: boolean
+  canCancel: boolean
   onBook: () => void
   onCancel?: () => void
 }) {
@@ -393,10 +399,11 @@ function SlotCard({
         {(status === 'my-pending' || status === 'my-approved') && onCancel && (
           <button
             onClick={onCancel}
-            disabled={isLoading}
+            disabled={isLoading || !canCancel}
+            title={canCancel ? undefined : CANCEL_CUTOFF_MSG}
             className="px-3 py-2 border border-gray-200 text-gray-400 text-xs font-medium rounded-xl hover:border-red-200 hover:text-red-500 disabled:opacity-50 transition-colors"
           >
-            {isLoading ? <Loader2 size={12} className="animate-spin" /> : 'Cancelar'}
+            {isLoading ? <Loader2 size={12} className="animate-spin" /> : canCancel ? 'Cancelar' : 'No cancelable'}
           </button>
         )}
       </div>

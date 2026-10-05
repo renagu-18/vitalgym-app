@@ -27,7 +27,13 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
-  const publicRoutes = ['/login', '/register']
+  // El enlace de recuperación de contraseña debe procesarse siempre, sin importar
+  // si ya hay o no una sesión activa (ver src/app/auth/confirm/route.ts).
+  if (pathname === '/auth/confirm') {
+    return supabaseResponse
+  }
+
+  const publicRoutes = ['/login', '/register', '/forgot-password']
   const isPublicRoute = publicRoutes.includes(pathname)
 
   if (!user && !isPublicRoute) {

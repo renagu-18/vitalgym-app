@@ -154,19 +154,9 @@ export async function completeBooking(bookingId: string) {
 
   const clientId = updated[0].client_id
 
-  const { data: sub } = await supabase
-    .from('subscriptions')
-    .select('id, classes_remaining')
-    .eq('client_id', clientId)
-    .eq('status', 'active')
-    .maybeSingle()
-
-  if (sub && sub.classes_remaining > 0 && sub.classes_remaining < 9999) {
-    await supabase
-      .from('subscriptions')
-      .update({ classes_remaining: sub.classes_remaining - 1 })
-      .eq('id', sub.id)
-  }
+  // Update atómico (sin read-then-write) para no perder un descuento si dos completeBooking
+  // para el mismo cliente corren en paralelo (p.ej. admin + cron al mismo tiempo).
+  await supabase.rpc('decrement_subscription_classes', { p_client_id: clientId })
 
   revalidatePath('/admin/bookings')
   revalidatePath('/admin')

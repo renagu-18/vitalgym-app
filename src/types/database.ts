@@ -454,6 +454,10 @@ export type Database = {
         Args: Record<string, never>
         Returns: number
       }
+      decrement_subscription_classes: {
+        Args: { p_client_id: string }
+        Returns: boolean
+      }
     }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>

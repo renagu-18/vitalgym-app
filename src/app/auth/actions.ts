@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 import { createClient } from '@/lib/supabase/server'
 
 export async function login(formData: FormData) {
@@ -59,4 +60,46 @@ export async function logout() {
   await supabase.auth.signOut()
   revalidatePath('/', 'layout')
   redirect('/login')
+}
+
+export async function requestPasswordReset(formData: FormData) {
+  const supabase = await createClient()
+  const email = formData.get('email') as string
+
+  const origin = (await headers()).get('origin') ?? process.env.NEXT_PUBLIC_SITE_URL ?? ''
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/auth/confirm?next=/reset-password`,
+  })
+
+  // No revelamos si el correo existe o no (evita enumeración de usuarios):
+  // ante un email inexistente Supabase también responde sin error.
+  if (error) {
+    return { error: 'No se pudo enviar el correo. Intenta nuevamente en unos minutos.' }
+  }
+
+  redirect('/forgot-password?sent=1')
+}
+
+export async function updatePassword(formData: FormData) {
+  const supabase = await createClient()
+  const password = formData.get('password') as string
+  const passwordConfirmation = formData.get('password_confirmation') as string
+
+  if (password !== passwordConfirmation) {
+    return { error: 'Las contraseñas no coinciden.' }
+  }
+  if (password.length < 8) {
+    return { error: 'La contraseña debe tener al menos 8 caracteres.' }
+  }
+
+  const { error } = await supabase.auth.updateUser({ password })
+
+  if (error) {
+    return { error: 'No se pudo actualizar la contraseña. Solicita un nuevo enlace de recuperación.' }
+  }
+
+  // Cierra la sesión de recuperación: obliga a iniciar sesión de nuevo con la contraseña nueva.
+  await supabase.auth.signOut()
+  redirect('/login?reset=1')
 }

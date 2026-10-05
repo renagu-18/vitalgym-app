@@ -2,7 +2,13 @@ import Link from 'next/link'
 import { login } from '@/app/auth/actions'
 import AuthForm from '@/components/auth/AuthForm'
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ reset?: string }>
+}) {
+  const { reset } = await searchParams
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm">
@@ -14,6 +20,14 @@ export default function LoginPage() {
 
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Iniciar sesión</h2>
+
+          {reset && (
+            <div className="bg-green-50 border border-green-200 rounded-lg px-3 py-2.5 mb-4">
+              <p className="text-sm text-green-700">
+                Tu contraseña se actualizó. Inicia sesión con la nueva contraseña.
+              </p>
+            </div>
+          )}
 
           <AuthForm action={login} submitLabel="Entrar">
             <div className="space-y-4">
@@ -49,6 +63,11 @@ export default function LoginPage() {
                              placeholder:text-gray-400"
                   placeholder="••••••••"
                 />
+                <div className="mt-2 text-right">
+                  <Link href="/forgot-password" className="text-xs font-medium text-brand underline underline-offset-2">
+                    ¿Olvidaste tu contraseña?
+                  </Link>
+                </div>
               </div>
             </div>
           </AuthForm>

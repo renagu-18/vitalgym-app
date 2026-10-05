@@ -88,6 +88,9 @@ export async function cancelBooking(bookingId: string) {
   if (!booking) return { error: 'Reserva no encontrada' }
   if (!['pending', 'approved'].includes(booking.status)) return { error: 'No puedes cancelar esta reserva' }
 
+  const hoursUntil = (new Date(booking.time_blocks.start_time).getTime() - Date.now()) / (1000 * 60 * 60)
+  if (hoursUntil < 4) return { error: 'Solo puedes cancelar hasta 4 horas antes de la clase' }
+
   const { error: updateError } = await supabase
     .from('bookings')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })

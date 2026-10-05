@@ -3,6 +3,9 @@
 -- Ejecutar en: Supabase Dashboard > SQL Editor
 -- ============================================================
 
+-- Requerida por los cron jobs de abajo (complete_past_bookings, monthly_classes_reset).
+CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA extensions;
+
 -- ─────────────────────────────────────────
 -- 1. PROFILES (extiende auth.users)
 -- ─────────────────────────────────────────
@@ -321,11 +324,33 @@ CREATE TRIGGER bookings_sync_count_insert
   AFTER INSERT ON public.bookings
   FOR EACH ROW EXECUTE FUNCTION sync_block_count();
 
+-- Función: descuenta atómicamente 1 clase de la suscripción activa de un cliente (sin
+-- read-then-write, para no perder un descuento si dos llamadas corren en paralelo, p.ej.
+-- completeBooking manual y el cron complete_past_bookings al mismo tiempo). Devuelve true
+-- si efectivamente descontó (false si el cliente no tiene suscripción activa con saldo, o
+-- es un plan ilimitado).
+CREATE OR REPLACE FUNCTION public.decrement_subscription_classes(p_client_id uuid)
+RETURNS boolean AS $$
+DECLARE
+  v_updated int;
+BEGIN
+  UPDATE public.subscriptions
+  SET classes_remaining = classes_remaining - 1
+  WHERE client_id = p_client_id
+    AND status = 'active'
+    AND classes_remaining > 0
+    AND classes_remaining < 9999; -- planes ilimitados no se tocan
+
+  GET DIAGNOSTICS v_updated = ROW_COUNT;
+  RETURN v_updated > 0;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Función: completa automáticamente las reservas 'approved' cuyo bloque horario ya pasó, y
 -- recién en ese momento descuenta 1 clase de la suscripción activa del cliente. El descuento
 -- ya NO ocurre al reservar ni al aprobar (ver requestBooking/approveBooking) — solo cuando la
--- clase efectivamente ocurrió o un admin la marca completada a mano (completeBooking). Pensada
--- para correr periódicamente vía pg_cron, mismo patrón que monthly_classes_reset.
+-- clase efectivamente ocurrió o un admin la marca completada a mano (completeBooking). Corre
+-- periódicamente vía pg_cron, mismo patrón que monthly_classes_reset.
 CREATE OR REPLACE FUNCTION public.complete_past_bookings()
 RETURNS int AS $$
 DECLARE
@@ -343,12 +368,7 @@ BEGIN
     SET status = 'completed', updated_at = now()
     WHERE id = b.id;
 
-    UPDATE public.subscriptions
-    SET classes_remaining = classes_remaining - 1
-    WHERE client_id = b.client_id
-      AND status = 'active'
-      AND classes_remaining > 0
-      AND classes_remaining < 9999; -- planes ilimitados no se tocan
+    PERFORM public.decrement_subscription_classes(b.client_id);
 
     v_count := v_count + 1;
   END LOOP;
@@ -357,8 +377,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Para activar el cron en Supabase (requiere pg_cron habilitado), cada 5 minutos:
--- SELECT cron.schedule('complete-past-bookings', '*/5 * * * *', 'SELECT complete_past_bookings()');
+-- Activa el cron, cada 5 minutos. Si ya existe un job con este nombre, re-ejecutar este
+-- SELECT no falla gracias a unschedule previo (evita duplicarlo en reseeds del schema).
+SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'complete-past-bookings';
+SELECT cron.schedule('complete-past-bookings', '*/5 * * * *', 'SELECT complete_past_bookings()');
 
 -- Función: reserva un cupo de forma atómica. Bloquea la fila del bloque (SELECT ... FOR UPDATE)
 -- para serializar solicitudes concurrentes sobre el mismo horario, valida el cupo con el dato
@@ -513,8 +535,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Para activar el cron en Supabase (requiere pg_cron habilitado):
--- SELECT cron.schedule('monthly-classes-reset', '5 0 * * *', 'SELECT monthly_classes_reset()');
+-- Activa el cron, todos los días a las 00:05. El unschedule previo evita duplicar el job
+-- si este schema se vuelve a ejecutar.
+SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'monthly-classes-reset';
+SELECT cron.schedule('monthly-classes-reset', '5 0 * * *', 'SELECT monthly_classes_reset()');
 
 
 -- ─────────────────────────────────────────

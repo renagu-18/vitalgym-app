@@ -7,6 +7,8 @@ type PaymentRow = {
   client_id: string
   amount: number
   month: string
+  due_date: string
+  /** 'overdue' se CALCULA acá (pendiente con due_date < hoy en Santiago); nunca se lee de la base */
   status: 'pending' | 'paid' | 'overdue'
   paid_at: string | null
   notes: string | null
@@ -19,7 +21,7 @@ export default async function AdminPaymentsPage() {
   const [{ data: rawPayments }, { data: clients }] = await Promise.all([
     supabase
       .from('payments')
-      .select('id, client_id, amount, month, status, paid_at, notes, client:profiles!payments_client_id_fkey(full_name)')
+      .select('id, client_id, amount, month, due_date, status, paid_at, notes, client:profiles!payments_client_id_fkey(full_name)')
       .order('month', { ascending: false }),
     supabase
       .from('profiles')
@@ -29,9 +31,13 @@ export default async function AdminPaymentsPage() {
   ])
 
   // Supabase returns the joined row as array or object depending on relation type; normalize to object
+  // Vencido = no pagado y due_date < hoy (hora de Santiago). Lo guardado en payments.status
+  // ('overdue' en filas antiguas) se ignora: solo importa si está pagado o no.
+  const todaySantiago = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' })
+
   const payments: PaymentRow[] = (rawPayments ?? []).map(p => ({
     ...p,
-    status: p.status as 'pending' | 'paid' | 'overdue',
+    status: p.status === 'paid' ? 'paid' : p.due_date < todaySantiago ? 'overdue' : 'pending',
     client: Array.isArray(p.client) ? (p.client[0] ?? null) : p.client,
   }))
 

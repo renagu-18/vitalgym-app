@@ -2,15 +2,16 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, AlertCircle, Trash2, Loader2 } from 'lucide-react'
-import { markPaymentPaid, markPaymentOverdue, deletePayment } from '@/app/admin/payments/actions'
+import { Check, Trash2, Loader2 } from 'lucide-react'
+import { markPaymentPaid, deletePayment } from '@/app/admin/payments/actions'
 
 interface Payment {
   id: string
   client_id: string
   amount: number
   month: string
-  status: 'pending' | 'paid' | 'overdue'
+  due_date: string
+  status: 'pending' | 'paid' | 'overdue' // calculado por la página, no almacenado
   paid_at: string | null
   notes: string | null
   client: { full_name: string } | null
@@ -54,6 +55,11 @@ export default function PaymentCard({ payment }: Props) {
         <div>
           <p className="text-sm font-semibold text-gray-900">{payment.client?.full_name}</p>
           <p className="text-xs text-gray-400 capitalize">{monthLabel}</p>
+          {payment.status !== 'paid' && (
+            <p className={`text-xs ${payment.status === 'overdue' ? 'text-red-600 font-semibold' : 'text-gray-400'}`}>
+              Vence el {new Date(payment.due_date + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </p>
+          )}
         </div>
         <span className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[payment.status]}`}>
           {STATUS_LABEL[payment.status]}
@@ -80,13 +86,6 @@ export default function PaymentCard({ payment }: Props) {
             className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-brand text-white text-xs font-semibold rounded-lg hover:bg-brand-dark disabled:opacity-50">
             {isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
             Marcar pagado
-          </button>
-        )}
-        {payment.status === 'pending' && (
-          <button onClick={() => run(() => markPaymentOverdue(payment.id))} disabled={isPending}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-amber-200 text-amber-700 text-xs font-semibold rounded-lg hover:bg-amber-50 disabled:opacity-50">
-            <AlertCircle size={12} />
-            Vencido
           </button>
         )}
         <button onClick={() => run(() => deletePayment(payment.id))} disabled={isPending}

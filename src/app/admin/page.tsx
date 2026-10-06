@@ -14,23 +14,17 @@ export default async function AdminDashboardPage() {
 
   const [
     { count: totalClients },
-    { count: todayBookings },
     { count: pendingPayments },
   ] = await Promise.all([
     supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('role', 'client'),
-    supabase
-      .from('bookings')
-      .select('*, time_blocks!inner(start_time)', { count: 'exact', head: true })
-      .eq('status', 'approved')
-      .gte('time_blocks.start_time', new Date().toISOString().split('T')[0])
-      .lt('time_blocks.start_time', new Date(Date.now() + 86400000).toISOString().split('T')[0]),
+    // Por cobrar = todo lo no pagado (pendiente o vencido; "vencido" ya no es un estado guardado).
     supabase
       .from('payments')
       .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending'),
+      .neq('status', 'paid'),
   ])
 
   const pendingPay = pendingPayments ?? 0
@@ -78,6 +72,10 @@ export default async function AdminDashboardPage() {
     .filter((x): x is { bookingId: string; status: TodayEntry['status']; client: { id: string; full_name: string }; block: { id: string; start_time: string; end_time: string } } => x !== null)
     .filter(x => dayKey(x.block.start_time) === todayKey)
     .sort((a, b) => a.block.start_time.localeCompare(b.block.start_time))
+
+  // "Clases hoy": approved + completed + no_show del día (hora de Santiago). Incluye las que el
+  // cron ya completó, así que el número no baja al empezar las clases. Sin las canceladas.
+  const todayBookings = todaySlots.filter(s => s.status !== 'cancelled_late').length
 
   const todayClientIds = Array.from(new Set(todaySlots.map(s => s.client.id)))
 
@@ -247,7 +245,7 @@ export default async function AdminDashboardPage() {
             <p className="text-[11px] text-white/50 mt-1 leading-tight">Clientes</p>
           </div>
           <div className="bg-white/10 rounded-xl p-3">
-            <p className="text-2xl font-bold leading-none">{todayBookings ?? 0}</p>
+            <p className="text-2xl font-bold leading-none">{todayBookings}</p>
             <p className="text-[11px] text-white/50 mt-1 leading-tight">Clases hoy</p>
           </div>
         </div>

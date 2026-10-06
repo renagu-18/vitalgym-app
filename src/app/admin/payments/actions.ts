@@ -50,20 +50,6 @@ export async function markPaymentPaid(paymentId: string) {
   return { success: true }
 }
 
-export async function markPaymentOverdue(paymentId: string) {
-  const { supabase, error } = await verifyAdmin()
-  if (!supabase) return { error }
-
-  const { error: updateErr } = await supabase
-    .from('payments')
-    .update({ status: 'overdue', paid_at: null })
-    .eq('id', paymentId)
-
-  if (updateErr) return { error: updateErr.message }
-  revalidatePath('/admin/payments')
-  return { success: true }
-}
-
 export async function deletePayment(paymentId: string) {
   const { supabase, error } = await verifyAdmin()
   if (!supabase) return { error }

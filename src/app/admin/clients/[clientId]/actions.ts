@@ -86,6 +86,66 @@ export async function createSubscription(data: {
   return { success: true }
 }
 
+// Rescate: una suscripción quedó 'scheduled' con inicio futuro (p.ej. se creó con una fecha de
+// inicio equivocada) y el cliente ve 0 clases porque el plan aún no está vigente. La recrea con
+// inicio HOY (reemplaza a la activa, si hay). Solo se permite si nunca se usó: sin pagos pagados ni
+// ajustes de clases, porque al recrearla se borran sus cuotas autogeneradas.
+export async function startScheduledSubscriptionNow(subId: string, clientId: string) {
+  const { supabase, error } = await verifyAdmin()
+  if (!supabase) return { error }
+
+  const { data: sub } = await supabase
+    .from('subscriptions')
+    .select('id, client_id, plan_id, start_date, status')
+    .eq('id', subId)
+    .single()
+  if (!sub || sub.client_id !== clientId) return { error: 'Suscripción no encontrada' }
+  if (sub.status !== 'scheduled') return { error: 'Solo se puede iniciar una suscripción programada' }
+
+  const [{ count: paid }, { count: adjustments }] = await Promise.all([
+    supabase.from('payments').select('id', { count: 'exact', head: true }).eq('subscription_id', subId).eq('status', 'paid'),
+    supabase.from('class_adjustments').select('id', { count: 'exact', head: true }).eq('subscription_id', subId),
+  ])
+  if ((paid ?? 0) > 0 || (adjustments ?? 0) > 0) {
+    return { error: 'Esta suscripción ya tiene pagos pagados o ajustes: no se puede recrear' }
+  }
+
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' })
+
+  // Se borra primero (sus cuotas sin pagar se van en cascada) para no chocar con el chequeo de
+  // solapes; si el nuevo insert falla, se restaura tal cual estaba.
+  const { error: delErr } = await supabase.from('subscriptions').delete().eq('id', subId)
+  if (delErr) return { error: delErr.message }
+
+  const { data: closed } = await supabase
+    .from('subscriptions')
+    .update({ status: 'expired' })
+    .eq('client_id', clientId)
+    .eq('status', 'active')
+    .select('id')
+
+  const { error: insertErr } = await supabase.from('subscriptions').insert({
+    client_id: clientId,
+    plan_id: sub.plan_id,
+    start_date: today,
+    status: 'active',
+  })
+
+  if (insertErr) {
+    if (closed?.length) {
+      await supabase.from('subscriptions').update({ status: 'active' }).in('id', closed.map(s => s.id))
+    }
+    await supabase.from('subscriptions').insert({
+      client_id: clientId, plan_id: sub.plan_id, start_date: sub.start_date, status: 'scheduled',
+    })
+    return { error: insertErr.message }
+  }
+
+  revalidatePath(`/admin/clients/${clientId}`)
+  revalidatePath('/admin/payments')
+  return { success: true }
+}
+
 export async function updateSubscription(subId: string, clientId: string, data: {
   status: SubscriptionStatus
 }) {

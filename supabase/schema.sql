@@ -277,6 +277,11 @@ DECLARE
 BEGIN
   SELECT price_monthly INTO v_price FROM public.plans WHERE id = NEW.plan_id;
 
+  -- Plan gratis (prueba, Pack Familia): no hay nada que cobrar, no se crea ninguna cuota.
+  IF COALESCE(v_price, 0) = 0 THEN
+    RETURN NEW;
+  END IF;
+
   INSERT INTO public.payments (client_id, subscription_id, amount, month, due_date, status, notes)
   VALUES
     (NEW.client_id, NEW.id, v_price, NEW.start_date,

@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Loader2, Check } from 'lucide-react'
-import { createSubscription, updateSubscription } from '@/app/admin/clients/[clientId]/actions'
+import { createSubscription, updateSubscription, startScheduledSubscriptionNow } from '@/app/admin/clients/[clientId]/actions'
 import type { SubscriptionStatus } from '@/types/database'
 
 interface Plan { id: string; name: string; classes_per_month: number; price_monthly: number }
@@ -39,11 +39,13 @@ export default function SubscriptionManager({ clientId, subscription, balance, p
   const [error, setError] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
 
-  // Form para nueva suscripción
-  const today = new Date().toISOString().split('T')[0]
+  // Form para nueva suscripción. "Hoy" es la fecha de Santiago (toISOString daría la de UTC, que
+  // desde la tarde-noche ya es mañana y dejaba la suscripción programada, con 0 clases).
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Santiago' })
   const [planId, setPlanId] = useState(plans[0]?.id ?? '')
-  // Si ya hay una suscripción, la renovación parte justo cuando termina la actual (queda programada).
-  const [startDate, setStartDate] = useState(subscription?.end_date ?? today)
+  // Por defecto empieza HOY: reemplaza a la actual (p.ej. de clase de prueba a un plan). Para una
+  // renovación al terminar la actual hay un atajo debajo del campo de fecha.
+  const [startDate, setStartDate] = useState(today)
 
   // Edición de la suscripción activa
   const [status, setStatus] = useState<SubscriptionStatus>(subscription?.status ?? 'active')
@@ -67,6 +69,11 @@ export default function SubscriptionManager({ clientId, subscription, balance, p
       planId,
       startDate,
     }).then(r => { if (!r.error) setShowNew(false); return r }))
+  }
+
+  function handleStartNow() {
+    if (!subscription) return
+    run(() => startScheduledSubscriptionNow(subscription.id, clientId))
   }
 
   function handleUpdateSub() {
@@ -114,6 +121,21 @@ export default function SubscriptionManager({ clientId, subscription, balance, p
             <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm
                          focus:outline-none focus:ring-2 focus:ring-brand" />
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <button type="button" onClick={() => setStartDate(today)} className="text-brand font-semibold">Hoy</button>
+              {subscription && subscription.end_date > today && (
+                <button type="button" onClick={() => setStartDate(subscription.end_date)} className="text-brand font-semibold">
+                  Al terminar la actual ({new Date(subscription.end_date + 'T12:00:00').toLocaleDateString('es-CL', { day: 'numeric', month: 'short' })})
+                </button>
+              )}
+            </div>
+            <p className={`mt-1 text-xs font-medium ${startDate > today ? 'text-blue-600' : 'text-green-700'}`}>
+              {startDate > today
+                ? 'Quedará programada: el cliente no tendrá clases de este plan hasta esa fecha.'
+                : subscription
+                  ? 'Empieza hoy y reemplaza a la suscripción actual (sus clases sobrantes se pierden).'
+                  : 'Empieza hoy.'}
+            </p>
           </div>
           {selectedPlan && (
             <p className="text-xs text-gray-400">
@@ -215,6 +237,19 @@ export default function SubscriptionManager({ clientId, subscription, balance, p
                   <p className="text-[10px] text-gray-400">vence</p>
                 </div>
               </div>
+              {subscription.status === 'scheduled' && (
+                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 space-y-2">
+                  <p className="text-xs text-blue-800">
+                    Este plan está programado y todavía no está vigente, por eso el cliente ve 0 clases.
+                  </p>
+                  <button onClick={handleStartNow} disabled={isPending}
+                    className="w-full py-2 bg-brand text-white rounded-lg text-xs font-semibold hover:bg-brand-dark
+                               disabled:opacity-50 flex items-center justify-center gap-1">
+                    {isPending ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                    Iniciar hoy
+                  </button>
+                </div>
+              )}
               <button onClick={() => setShowNew(true)}
                 className="w-full py-2 border border-dashed border-gray-200 rounded-lg text-xs
                            text-gray-400 hover:border-gray-300 hover:text-gray-600 flex items-center justify-center gap-1">

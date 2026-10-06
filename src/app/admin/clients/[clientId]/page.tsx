@@ -2,6 +2,7 @@ import { notFound } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import ClientProfileForm from '@/components/admin/ClientProfileForm'
 import SubscriptionManager from '@/components/admin/SubscriptionManager'
+import SubscriptionHistory from '@/components/admin/SubscriptionHistory'
 import ClassBalanceCard, { type AdjustmentRow, type ReturnableBooking } from '@/components/admin/ClassBalanceCard'
 import type { SubscriptionStatus } from '@/types/database'
 
@@ -54,6 +55,13 @@ export default async function AdminClientDetailPage({ params }: Props) {
         .eq('subscription_id', subscription.id)
         .maybeSingle()
     : { data: null }
+
+  // Historial de planes: todas las suscripciones del cliente (vista subscription_history, más reciente primero).
+  const { data: history } = await supabase
+    .from('subscription_history')
+    .select('*')
+    .eq('client_id', clientId)
+    .order('start_date', { ascending: false })
 
   // Historial de ajustes de TODAS las suscripciones del cliente (solo lo ve el admin: esta página
   // es del panel admin y class_adjustments solo deja leer al admin o al dueño).
@@ -134,6 +142,8 @@ export default async function AdminClientDetailPage({ params }: Props) {
         adjustments={adjustments}
         returnable={returnable}
       />
+
+      <SubscriptionHistory rows={history ?? []} />
     </div>
   )
 }

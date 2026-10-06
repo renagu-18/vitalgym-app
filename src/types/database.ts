@@ -193,6 +193,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: 'subscriptions'
             referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'class_adjustments_booking_id_fkey'
+            columns: ['booking_id']
+            isOneToOne: false
+            referencedRelation: 'bookings'
+            referencedColumns: ['id']
           }
         ]
       }

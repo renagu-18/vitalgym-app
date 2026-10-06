@@ -21,7 +21,8 @@ interface Props {
 
 const NO_CLASSES_MSG = 'No tienes clases disponibles en tu plan actual. Contáctanos para renovar.'
 const CANCEL_CUTOFF_HOURS = 4
-const CANCEL_CUTOFF_MSG = 'Solo puedes cancelar hasta 4 horas antes de la clase'
+const LATE_CANCEL_CONFIRM = 'Cancelando ahora se descuenta la clase. ¿Quieres cancelar de todas formas?'
+const STARTED_MSG = 'La clase ya comenzó'
 
 const TZ = 'America/Santiago'
 const DAY_ABBREVS = ['Lu', 'Ma', 'Mi', 'Ju', 'Vi', 'Sá', 'Do']
@@ -143,7 +144,11 @@ export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey,
     router.refresh()
   }
 
-  async function handleCancel(bookingId: string) {
+  async function handleCancel(bookingId: string, startTime: string) {
+    // Menos de 4 h antes: se puede cancelar, pero la clase se descuenta. Pedimos confirmación.
+    const hoursUntil = (new Date(startTime).getTime() - new Date().getTime()) / 3_600_000
+    if (hoursUntil < CANCEL_CUTOFF_HOURS && !window.confirm(LATE_CANCEL_CONFIRM)) return
+
     setErrorMsg(null)
     setLoadingId(bookingId)
     const res = await cancelBooking(bookingId)
@@ -305,7 +310,8 @@ export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey,
                 const spots = block.max_capacity - block.current_count
                 const isLoading = loadingId === block.id || loadingId === myBk?.id
                 const hoursUntil = (new Date(block.start_time).getTime() - now.getTime()) / 3_600_000
-                const canCancel = hoursUntil >= CANCEL_CUTOFF_HOURS
+                const canCancel = hoursUntil > 0
+                const isLateCancel = hoursUntil < CANCEL_CUTOFF_HOURS
                 return (
                   <SlotCard
                     key={block.id}
@@ -315,8 +321,9 @@ export default function MonthCalendar({ timeBlocks, myBookings, month, todayKey,
                     isLoading={isLoading}
                     canBook={canBook}
                     canCancel={canCancel}
+                    isLateCancel={isLateCancel}
                     onBook={() => setSelectedBlock(block)}
-                    onCancel={myBk ? () => handleCancel(myBk.id) : undefined}
+                    onCancel={myBk ? () => handleCancel(myBk.id, block.start_time) : undefined}
                   />
                 )
               })}
@@ -357,7 +364,7 @@ const SLOT_STYLE: Record<BlockStatus, {
 }
 
 function SlotCard({
-  block, status, spots, isLoading, canBook, canCancel, onBook, onCancel,
+  block, status, spots, isLoading, canBook, canCancel, isLateCancel, onBook, onCancel,
 }: {
   block: TimeBlock
   status: BlockStatus
@@ -365,6 +372,7 @@ function SlotCard({
   isLoading: boolean
   canBook: boolean
   canCancel: boolean
+  isLateCancel: boolean
   onBook: () => void
   onCancel?: () => void
 }) {
@@ -400,10 +408,10 @@ function SlotCard({
           <button
             onClick={onCancel}
             disabled={isLoading || !canCancel}
-            title={canCancel ? undefined : CANCEL_CUTOFF_MSG}
+            title={!canCancel ? STARTED_MSG : isLateCancel ? 'Cancelar ahora descuenta la clase' : undefined}
             className="px-3 py-2 border border-gray-200 text-gray-400 text-xs font-medium rounded-xl hover:border-red-200 hover:text-red-500 disabled:opacity-50 transition-colors"
           >
-            {isLoading ? <Loader2 size={12} className="animate-spin" /> : canCancel ? 'Cancelar' : 'No cancelable'}
+            {isLoading ? <Loader2 size={12} className="animate-spin" /> : canCancel ? 'Cancelar' : 'En curso'}
           </button>
         )}
       </div>

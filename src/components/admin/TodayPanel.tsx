@@ -1,8 +1,11 @@
 'use client'
 
-import { useState } from 'react'
-import { X, Clock, Dumbbell, History } from 'lucide-react'
+import { useState, useTransition } from 'react'
+import { useRouter } from 'next/navigation'
+import { X, Clock, Dumbbell, History, Loader2 } from 'lucide-react'
 import RoutineEditor from '@/components/training/RoutineEditor'
+import { setBookingAttendance, returnClass } from '@/app/admin/classes/actions'
+import type { RefundReason } from '@/lib/class-adjustments'
 
 const TZ = 'America/Santiago'
 
@@ -27,6 +30,10 @@ interface LastSessionExercise {
 
 export interface TodayEntry {
   bookingId: string
+  /** approved/completed = asistió (o asistirá); no_show = no vino; cancelled_late = canceló con < 4 h. Los dos últimos descuentan. */
+  status: 'approved' | 'completed' | 'no_show' | 'cancelled_late'
+  /** ya tuvo una devolución de clase (ajuste +1 ligado a la reserva) */
+  refunded: boolean
   blockStart: string
   blockEnd: string
   client: { id: string; full_name: string }
@@ -87,22 +94,30 @@ export default function TodayPanel({ entries }: Props) {
       ) : (
         <div className="divide-y divide-gray-50">
           {entries.map(entry => (
-            <button
-              key={entry.bookingId}
-              onClick={() => openClient(entry)}
-              className="w-full px-4 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors text-left"
-            >
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 tabular-nums shrink-0 w-24">
-                <Clock size={12} className="text-gray-300" />
-                {fmtTime(entry.blockStart)}–{fmtTime(entry.blockEnd)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{entry.client.full_name}</p>
-                <p className={`text-xs mt-0.5 truncate ${entry.routine ? 'text-gray-500' : 'text-gray-300'}`}>
-                  {entry.routine ? entry.routine.name : 'Sin rutina asignada'}
-                </p>
-              </div>
-            </button>
+            <div key={entry.bookingId} className="px-4 py-3">
+              <button
+                onClick={() => openClient(entry)}
+                className="w-full flex items-center gap-3 hover:opacity-80 transition-opacity text-left"
+              >
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 tabular-nums shrink-0 w-24">
+                  <Clock size={12} className="text-gray-300" />
+                  {fmtTime(entry.blockStart)}–{fmtTime(entry.blockEnd)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 truncate">{entry.client.full_name}</p>
+                  <p className={`text-xs mt-0.5 truncate ${entry.routine ? 'text-gray-500' : 'text-gray-300'}`}>
+                    {entry.routine ? entry.routine.name : 'Sin rutina asignada'}
+                  </p>
+                </div>
+                {entry.status === 'no_show' && (
+                  <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full shrink-0">No vino</span>
+                )}
+                {entry.status === 'cancelled_late' && (
+                  <span className="text-[10px] font-semibold text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full shrink-0">Canceló tarde</span>
+                )}
+              </button>
+              <AttendanceActions entry={entry} />
+            </div>
           ))}
         </div>
       )}
@@ -160,6 +175,81 @@ export default function TodayPanel({ entries }: Props) {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Botones de asistencia de una clase. "No vino" pide una confirmación mínima (segundo toque) y
+// después ofrece "Deshacer". Funciona igual si el cron ya la había pasado a completed.
+function AttendanceActions({ entry }: { entry: TodayEntry }) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
+  const [confirming, setConfirming] = useState(false)
+  const [choosingRefund, setChoosingRefund] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  function run(fn: () => Promise<{ error?: string | null }>) {
+    setError(null)
+    startTransition(async () => {
+      const res = await fn()
+      if (res?.error) { setError(res.error); return }
+      setConfirming(false)
+      setChoosingRefund(false)
+      router.refresh()
+    })
+  }
+
+  const btn = 'text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors disabled:opacity-50'
+  const spinner = isPending && <Loader2 size={12} className="animate-spin" />
+
+  return (
+    <div className="mt-2 pl-[6.75rem] space-y-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        {(entry.status === 'approved' || entry.status === 'completed') && (
+          confirming ? (
+            <>
+              <span className="text-xs text-gray-500">¿No vino? Se descuenta la clase.</span>
+              <button disabled={isPending} onClick={() => run(() => setBookingAttendance(entry.bookingId, 'no_show'))}
+                className={`${btn} bg-black text-white border-black flex items-center gap-1`}>{spinner}Sí</button>
+              <button disabled={isPending} onClick={() => setConfirming(false)}
+                className={`${btn} border-gray-200 text-gray-600`}>No</button>
+            </>
+          ) : (
+            <button onClick={() => setConfirming(true)} className={`${btn} border-gray-200 text-gray-600 hover:border-gray-400`}>
+              No vino
+            </button>
+          )
+        )}
+
+        {entry.status === 'no_show' && (
+          <button disabled={isPending} onClick={() => run(() => setBookingAttendance(entry.bookingId, 'present'))}
+            className={`${btn} border-gray-200 text-gray-600 hover:border-gray-400 flex items-center gap-1`}>
+            {spinner}Deshacer
+          </button>
+        )}
+
+        {(entry.status === 'no_show' || entry.status === 'cancelled_late') && (
+          entry.refunded ? (
+            <span className="text-xs text-green-700">Clase devuelta</span>
+          ) : choosingRefund ? (
+            <>
+              <span className="text-xs text-gray-500">Devolver por:</span>
+              {(['reagendada', 'excepción'] as RefundReason[]).map(r => (
+                <button key={r} disabled={isPending} onClick={() => run(() => returnClass(entry.bookingId, r))}
+                  className={`${btn} border-gray-200 text-gray-700 hover:border-gray-400 capitalize flex items-center gap-1`}>
+                  {spinner}{r}
+                </button>
+              ))}
+              <button disabled={isPending} onClick={() => setChoosingRefund(false)} className="text-xs text-gray-400">Cancelar</button>
+            </>
+          ) : (
+            <button onClick={() => setChoosingRefund(true)} className={`${btn} border-brand/40 text-brand hover:bg-brand/5`}>
+              Devolver clase
+            </button>
+          )
+        )}
+      </div>
+      {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   )
 }

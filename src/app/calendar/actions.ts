@@ -90,8 +90,12 @@ export async function cancelBooking(bookingId: string) {
   if (!booking) return { error: 'Reserva no encontrada' }
   if (!['pending', 'approved'].includes(booking.status)) return { error: 'No puedes cancelar esta reserva' }
 
-  const hoursUntil = (new Date(booking.time_blocks.start_time).getTime() - Date.now()) / (1000 * 60 * 60)
-  if (hoursUntil < 4) return { error: 'Solo puedes cancelar hasta 4 horas antes de la clase' }
+  // Con menos de 4 h se permite cancelar, pero cuenta como clase usada: el trigger bookings_guard
+  // marca late_cancel = true y la vista de saldo la descuenta. La UI avisa antes de confirmar.
+  // Una clase que ya empezó no se puede cancelar.
+  if (new Date(booking.time_blocks.start_time).getTime() <= Date.now()) {
+    return { error: 'La clase ya comenzó, no se puede cancelar' }
+  }
 
   const { error: updateError } = await supabase
     .from('bookings')

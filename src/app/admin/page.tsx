@@ -46,6 +46,8 @@ export default async function AdminDashboardPage() {
 
   type RawTodayBooking = {
     id: string
+    status: string
+    late_cancel: boolean
     client: { id: string; full_name: string } | { id: string; full_name: string }[] | null
     time_blocks: { id: string; start_time: string; end_time: string }
       | { id: string; start_time: string; end_time: string }[] | null
@@ -54,11 +56,13 @@ export default async function AdminDashboardPage() {
   const { data: rawTodayBookings } = await supabase
     .from('bookings')
     .select(`
-      id,
+      id, status, late_cancel,
       client:profiles!bookings_client_id_fkey(id, full_name),
       time_blocks!inner(id, start_time, end_time)
     `)
-    .eq('status', 'approved')
+    // approved + lo que el cron ya pasó a completed + no_show, para poder marcar/corregir asistencia
+    // aunque la clase ya haya empezado; y las canceladas tarde (descuentan, se pueden devolver).
+    .in('status', ['approved', 'completed', 'no_show', 'cancelled'])
     .gte('time_blocks.start_time', wideStart)
     .lte('time_blocks.start_time', wideEnd)
 
@@ -66,13 +70,27 @@ export default async function AdminDashboardPage() {
     .map(b => {
       const client = Array.isArray(b.client) ? b.client[0] : b.client
       const block = Array.isArray(b.time_blocks) ? b.time_blocks[0] : b.time_blocks
-      return client && block ? { bookingId: b.id, client, block } : null
+      if (!client || !block) return null
+      if (b.status === 'cancelled' && !b.late_cancel) return null // cancelada a tiempo: no cuenta
+      const status = (b.status === 'cancelled' ? 'cancelled_late' : b.status) as TodayEntry['status']
+      return { bookingId: b.id, status, client, block }
     })
-    .filter((x): x is { bookingId: string; client: { id: string; full_name: string }; block: { id: string; start_time: string; end_time: string } } => x !== null)
+    .filter((x): x is { bookingId: string; status: TodayEntry['status']; client: { id: string; full_name: string }; block: { id: string; start_time: string; end_time: string } } => x !== null)
     .filter(x => dayKey(x.block.start_time) === todayKey)
     .sort((a, b) => a.block.start_time.localeCompare(b.block.start_time))
 
   const todayClientIds = Array.from(new Set(todaySlots.map(s => s.client.id)))
+
+  // Reservas de hoy que ya tuvieron una devolución (ajuste positivo ligado a la reserva).
+  const todayBookingIds = todaySlots.map(s => s.bookingId)
+  const { data: refundRows } = todayBookingIds.length
+    ? await supabase
+        .from('class_adjustments')
+        .select('booking_id')
+        .in('booking_id', todayBookingIds)
+        .gt('quantity', 0)
+    : { data: [] }
+  const refundedIds = new Set((refundRows ?? []).map(r => r.booking_id))
 
   type RoutineRow = { id: string; client_id: string; name: string; is_active: boolean; description: string | null }
   type ExerciseRow = {
@@ -141,6 +159,8 @@ export default async function AdminDashboardPage() {
 
     return {
       bookingId: slot.bookingId,
+      status: slot.status,
+      refunded: refundedIds.has(slot.bookingId),
       blockStart: slot.block.start_time,
       blockEnd: slot.block.end_time,
       client: slot.client,

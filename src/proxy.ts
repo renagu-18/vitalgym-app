@@ -33,6 +33,12 @@ export async function proxy(request: NextRequest) {
     return supabaseResponse
   }
 
+  // /reset-password solo sirve con la sesión de recuperación que crea el callback. Sin sesión
+  // (enlace no usado, vencido o página abierta a mano) se manda a pedir un enlace nuevo.
+  if (!user && pathname === '/reset-password') {
+    return NextResponse.redirect(new URL('/forgot-password?error=1', request.url))
+  }
+
   const publicRoutes = ['/login', '/register', '/forgot-password']
   const isPublicRoute = publicRoutes.includes(pathname)
 

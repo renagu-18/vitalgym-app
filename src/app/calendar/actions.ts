@@ -22,10 +22,12 @@ export async function requestBooking(timeBlockId: string) {
       .eq('id', user.id)
       .single(),
     supabase
-      .from('subscriptions')
-      .select('id, classes_remaining')
+      .from('subscription_class_balance')
+      .select('available')
       .eq('client_id', user.id)
-      .eq('status', 'active')
+      .eq('is_current', true)
+      .order('start_date', { ascending: false })
+      .limit(1)
       .maybeSingle(),
   ])
 
@@ -39,10 +41,10 @@ export async function requestBooking(timeBlockId: string) {
   // bloquea la fila del bloque y verifica el cupo en la misma transacción del INSERT.
   if (block.current_count >= block.max_capacity) return { error: 'Este bloque ya no tiene cupos disponibles' }
 
-  // Bug 2: sin clases disponibles, no se puede reservar. El descuento de la clase ya NO ocurre
-  // acá (ver Bug 1) — solo cuando la clase se completa (complete_past_bookings / completeBooking)
-  // — pero esta validación de saldo sigue siendo necesaria para no dejar reservar con 0 clases.
-  if (!sub || sub.classes_remaining <= 0) {
+  // Sin clases disponibles, no se puede reservar. El saldo se deriva (plan + ajustes - usadas:
+  // completed, no_show y cancelaciones tardías), no se descuenta al reservar; `available` ya es 0
+  // si la suscripción no está vigente.
+  if (!sub || sub.available <= 0) {
     return { error: 'No tienes clases disponibles en tu plan actual. Contáctanos para renovar.' }
   }
 

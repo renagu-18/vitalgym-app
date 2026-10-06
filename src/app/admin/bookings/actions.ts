@@ -132,31 +132,24 @@ export async function rejectBooking(bookingId: string, reason?: string) {
   return { success: true }
 }
 
-// Marca una reserva aprobada como completada (la clase ya se dictó) y recién en ese momento
-// descuenta 1 clase de la suscripción activa del cliente. Es el mismo descuento que aplica
-// automáticamente complete_past_bookings() cuando pasa start_time; esta es la versión manual
-// para cuando el admin quiere completarla antes de que corra el cron.
+// Marca una reserva aprobada como completada (la clase ya se dictó). No hay contador que
+// descontar: el saldo se deriva de los estados de las reservas (vista subscription_class_balance),
+// igual que cuando lo hace complete_past_bookings() al pasar start_time; esta es la versión manual
+// para completarla antes de que corra el cron.
 export async function completeBooking(bookingId: string) {
   const { supabase, error: authError } = await verifyAdmin()
   if (!supabase) return { error: authError }
 
-  // Update con guard: solo transiciona si sigue 'approved', para no descontar dos veces
-  // si se hace doble clic o la reserva ya fue completada por el cron mientras tanto.
+  // Update con guard: solo transiciona si sigue 'approved' (doble clic, o ya la completó el cron).
   const { data: updated, error: updateError } = await supabase
     .from('bookings')
     .update({ status: 'completed', updated_at: new Date().toISOString() })
     .eq('id', bookingId)
     .eq('status', 'approved')
-    .select('client_id')
+    .select('id')
 
   if (updateError) return { error: 'Error al completar la reserva' }
   if (!updated || updated.length === 0) return { error: 'La reserva no está aprobada o ya fue procesada' }
-
-  const clientId = updated[0].client_id
-
-  // Update atómico (sin read-then-write) para no perder un descuento si dos completeBooking
-  // para el mismo cliente corren en paralelo (p.ej. admin + cron al mismo tiempo).
-  await supabase.rpc('decrement_subscription_classes', { p_client_id: clientId })
 
   revalidatePath('/admin/bookings')
   revalidatePath('/admin')

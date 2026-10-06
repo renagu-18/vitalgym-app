@@ -4,33 +4,36 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Loader2, Check } from 'lucide-react'
 import { createSubscription, updateSubscription } from '@/app/admin/clients/[clientId]/actions'
+import type { SubscriptionStatus } from '@/types/database'
 
 interface Plan { id: string; name: string; classes_per_month: number; price_monthly: number }
 interface Sub {
   id: string
-  status: 'active' | 'paused' | 'expired'
+  status: SubscriptionStatus
   start_date: string
   end_date: string
-  classes_remaining: number
   plan: Plan | null
 }
+interface Balance { available: number; is_unlimited: boolean; adjustments: number; used: number }
 
 interface Props {
   clientId: string
   subscription: Sub | null
+  balance: Balance | null
   plans: Plan[]
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  active: 'Activa', paused: 'Pausada', expired: 'Vencida',
+  scheduled: 'Programada', active: 'Activa', paused: 'Pausada', expired: 'Vencida',
 }
 const STATUS_COLOR: Record<string, string> = {
+  scheduled: 'bg-blue-50 text-blue-700',
   active: 'bg-green-50 text-green-700',
   paused: 'bg-amber-50 text-amber-700',
   expired: 'bg-gray-100 text-gray-500',
 }
 
-export default function SubscriptionManager({ clientId, subscription, plans }: Props) {
+export default function SubscriptionManager({ clientId, subscription, balance, plans }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
@@ -39,11 +42,11 @@ export default function SubscriptionManager({ clientId, subscription, plans }: P
   // Form para nueva suscripción
   const today = new Date().toISOString().split('T')[0]
   const [planId, setPlanId] = useState(plans[0]?.id ?? '')
-  const [startDate, setStartDate] = useState(today)
+  // Si ya hay una suscripción, la renovación parte justo cuando termina la actual (queda programada).
+  const [startDate, setStartDate] = useState(subscription?.end_date ?? today)
 
   // Edición de la suscripción activa
-  const [classes, setClasses] = useState(subscription?.classes_remaining ?? 0)
-  const [status, setStatus] = useState<'active' | 'paused' | 'expired'>(subscription?.status ?? 'active')
+  const [status, setStatus] = useState<SubscriptionStatus>(subscription?.status ?? 'active')
   const [editSub, setEditSub] = useState(false)
 
   function run(fn: () => Promise<{ error?: string | null }>) {
@@ -63,16 +66,12 @@ export default function SubscriptionManager({ clientId, subscription, plans }: P
       clientId,
       planId,
       startDate,
-      classesRemaining: selectedPlan?.classes_per_month ?? 0,
     }).then(r => { if (!r.error) setShowNew(false); return r }))
   }
 
   function handleUpdateSub() {
     if (!subscription) return
-    run(() => updateSubscription(subscription.id, clientId, {
-      classesRemaining: classes,
-      status,
-    }).then(r => { if (!r.error) setEditSub(false); return r }))
+    run(() => updateSubscription(subscription.id, clientId, { status }).then(r => { if (!r.error) setEditSub(false); return r }))
   }
 
   return (
@@ -123,6 +122,7 @@ export default function SubscriptionManager({ clientId, subscription, plans }: P
                 : `Se asignarán ${selectedPlan.classes_per_month} clases al mes automáticamente.`}
               {' '}Vence automáticamente 3 meses después del inicio, y se generan 3 pagos
               mensuales pendientes de ${selectedPlan.price_monthly.toLocaleString('es-CL')} cada uno.
+              {' '}Si el inicio es una fecha futura, queda programada y se activa sola ese día.
             </p>
           )}
           <div className="flex gap-2">
@@ -145,22 +145,28 @@ export default function SubscriptionManager({ clientId, subscription, plans }: P
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Clases disponibles</label>
-                  <input type="number" min={0} value={classes}
-                    onChange={e => setClasses(parseInt(e.target.value) || 0)}
+                  <input type="text" readOnly disabled
+                    value={balance ? (balance.is_unlimited ? 'Ilimitadas' : balance.available) : '—'}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm
-                               focus:outline-none focus:ring-2 focus:ring-brand" />
+                               bg-gray-50 text-gray-500 cursor-not-allowed" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Estado</label>
                   <select value={status} onChange={e => setStatus(e.target.value as typeof status)}
                     className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm
                                focus:outline-none focus:ring-2 focus:ring-brand">
+                    <option value="scheduled">Programada</option>
                     <option value="active">Activa</option>
                     <option value="paused">Pausada</option>
                     <option value="expired">Vencida</option>
                   </select>
                 </div>
               </div>
+              <p className="text-xs text-gray-400">
+                Las clases ya no se editan a mano: se calculan (plan + ajustes − usadas). Para sumar o
+                restar clases se carga un ajuste en class_adjustments (por ahora por SQL, ver
+                supabase/README.md; el botón llega con el panel admin).
+              </p>
               <div className="flex gap-2">
                 <button onClick={() => setEditSub(false)} disabled={isPending}
                   className="flex-1 py-2 border border-gray-200 rounded-lg text-sm text-gray-600">
@@ -190,9 +196,9 @@ export default function SubscriptionManager({ clientId, subscription, plans }: P
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center">
-                <div className={`rounded-lg p-2 ${subscription.classes_remaining >= 9999 ? 'bg-green-50' : 'bg-gray-50'}`}>
-                  <p className={`text-lg font-bold ${subscription.classes_remaining >= 9999 ? 'text-green-700' : 'text-gray-900'}`}>
-                    {subscription.classes_remaining >= 9999 ? '∞' : subscription.classes_remaining}
+                <div className={`rounded-lg p-2 ${balance?.is_unlimited ? 'bg-green-50' : 'bg-gray-50'}`}>
+                  <p className={`text-lg font-bold ${balance?.is_unlimited ? 'text-green-700' : 'text-gray-900'}`}>
+                    {balance ? (balance.is_unlimited ? '∞' : balance.available) : '—'}
                   </p>
                   <p className="text-[10px] text-gray-400">clases disp.</p>
                 </div>

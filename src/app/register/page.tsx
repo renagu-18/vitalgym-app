@@ -67,6 +67,22 @@ export default function RegisterPage() {
               </div>
 
               <div>
+                <label htmlFor="birth_date" className="block text-sm font-medium text-gray-700 mb-1">
+                  Fecha de nacimiento
+                </label>
+                <input
+                  id="birth_date"
+                  name="birth_date"
+                  type="date"
+                  required
+                  autoComplete="bday"
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm
+                             focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+                />
+                <p className="mt-1 text-xs text-gray-400">Debes tener entre 17 y 60 años.</p>
+              </div>
+
+              <div>
                 <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
                   Contraseña
                 </label>

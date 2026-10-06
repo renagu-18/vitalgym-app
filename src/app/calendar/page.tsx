@@ -40,11 +40,14 @@ export default async function CalendarPage({
       .gte('start_time', monthStart.toISOString())
       .lte('start_time', monthEnd.toISOString())
       .order('start_time'),
+    // Saldo derivado (plan + ajustes - usadas) de la suscripción vigente hoy.
     supabase
-      .from('subscriptions')
-      .select('classes_remaining')
+      .from('subscription_class_balance')
+      .select('available')
       .eq('client_id', user.id)
-      .eq('status', 'active')
+      .eq('is_current', true)
+      .order('start_date', { ascending: false })
+      .limit(1)
       .maybeSingle(),
   ])
 
@@ -68,7 +71,7 @@ export default async function CalendarPage({
       month={monthStr}
       todayKey={todayKey}
       serverNow={new Date().toISOString()}
-      classesRemaining={sub?.classes_remaining ?? 0}
+      classesRemaining={sub?.available ?? 0}
     />
   )
 }

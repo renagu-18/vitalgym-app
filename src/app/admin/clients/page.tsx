@@ -3,9 +3,10 @@ import Link from 'next/link'
 import { ChevronRight, UserCircle } from 'lucide-react'
 
 const STATUS_LABEL: Record<string, string> = {
-  active: 'Activa', paused: 'Pausada', expired: 'Vencida',
+  scheduled: 'Programada', active: 'Activa', paused: 'Pausada', expired: 'Vencida',
 }
 const STATUS_COLOR: Record<string, string> = {
+  scheduled: 'bg-blue-50 text-blue-700',
   active: 'bg-green-50 text-green-700',
   paused: 'bg-amber-50 text-amber-700',
   expired: 'bg-gray-100 text-gray-500',
@@ -25,15 +26,24 @@ export default async function AdminClientsPage() {
   const { data: subscriptions } = clientIds.length
     ? await supabase
         .from('subscriptions')
-        .select('id, client_id, status, classes_remaining, end_date, plans ( name )')
+        .select('id, client_id, status, end_date, plans ( name )')
         .in('client_id', clientIds)
     : { data: [] }
+
+  // Saldo derivado (plan + ajustes - usadas) de la suscripción vigente de cada cliente.
+  const { data: balances } = clientIds.length
+    ? await supabase
+        .from('subscription_class_balance')
+        .select('client_id, available, is_unlimited')
+        .in('client_id', clientIds)
+        .eq('is_current', true)
+    : { data: [] }
+  const balanceByClient = new Map((balances ?? []).map(b => [b.client_id, b]))
 
   type SubRow = {
     id: string
     client_id: string
     status: string
-    classes_remaining: number
     end_date: string | null
     plans: { name: string } | { name: string }[] | null
   }
@@ -84,7 +94,10 @@ export default async function AdminClientsPage() {
                         {STATUS_LABEL[activeSub.status]}
                       </span>
                       <span className="text-[10px] text-gray-400">
-                        {activeSub.classes_remaining >= 9999 ? 'Ilimitadas' : `${activeSub.classes_remaining} clases`} · {planName ?? '—'}
+                        {(() => {
+                          const bal = balanceByClient.get(client.id)
+                          return bal?.is_unlimited ? 'Ilimitadas' : `${bal?.available ?? 0} clases`
+                        })()} · {planName ?? '—'}
                       </span>
                     </>
                   ) : (

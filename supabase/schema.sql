@@ -1,6 +1,10 @@
 -- ============================================================
 -- VitalGym — Schema completo para Supabase
 -- Ejecutar en: Supabase Dashboard > SQL Editor
+--
+-- Snapshot del estado final para instalaciones nuevas. En una base que ya existe NO se re-ejecuta:
+-- se aplican las migraciones de supabase/migrations/ en orden (ver supabase/README.md). Este
+-- archivo está sincronizado con 2026-10-05_01…05.
 -- ============================================================
 
 -- Requerida por los cron jobs de abajo (complete_past_bookings, monthly_classes_reset).
@@ -16,6 +20,7 @@ CREATE TABLE public.profiles (
   phone        text,
   role         text NOT NULL DEFAULT 'client' CHECK (role IN ('admin', 'client')),
   notify_via   text NOT NULL DEFAULT 'gmail' CHECK (notify_via IN ('whatsapp', 'gmail')),
+  birth_date   date,           -- la edad se calcula desde acá; NULL en clientes antiguos
   created_at   timestamptz NOT NULL DEFAULT now(),
   updated_at   timestamptz NOT NULL DEFAULT now()
 );
@@ -34,16 +39,25 @@ CREATE TRIGGER profiles_updated_at
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- Trigger: crea el profile automáticamente al registrar usuario en auth
-CREATE OR REPLACE FUNCTION handle_new_user()
+CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_birth date;
 BEGIN
-  INSERT INTO public.profiles (id, full_name, email, phone, notify_via)
+  BEGIN
+    v_birth := NULLIF(NEW.raw_user_meta_data->>'birth_date', '')::date;
+  EXCEPTION WHEN others THEN
+    v_birth := NULL;
+  END;
+
+  INSERT INTO public.profiles (id, full_name, email, phone, notify_via, birth_date)
   VALUES (
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
     NEW.email,
     NEW.raw_user_meta_data->>'phone',
-    COALESCE(NEW.raw_user_meta_data->>'notify_via', 'gmail')
+    COALESCE(NEW.raw_user_meta_data->>'notify_via', 'gmail'),
+    v_birth
   );
   RETURN NEW;
 END;
@@ -52,6 +66,32 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+
+-- Hardening: las policies "Cliente edita su propio perfil" e "Insertar perfil propio" no tienen
+-- WITH CHECK sobre columnas, así que un cliente podía hacerse admin (UPDATE ... SET role='admin').
+-- Este trigger lo impide. auth.uid() IS NULL = SQL Editor / service_role / triggers de auth
+-- (handle_new_user), que siguen pudiendo todo.
+CREATE OR REPLACE FUNCTION public.profiles_guard_role()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF auth.uid() IS NULL OR public.is_admin() THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' AND NEW.role <> 'client' THEN
+    RAISE EXCEPTION 'No autorizado a crear un perfil con rol %', NEW.role USING ERRCODE = '42501';
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.role IS DISTINCT FROM OLD.role THEN
+    RAISE EXCEPTION 'No autorizado a cambiar el rol' USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+DROP TRIGGER IF EXISTS profiles_guard_role ON public.profiles;
+CREATE TRIGGER profiles_guard_role
+  BEFORE INSERT OR UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.profiles_guard_role();
 
 
 -- ─────────────────────────────────────────
@@ -62,6 +102,7 @@ CREATE TABLE public.plans (
   name               text NOT NULL,
   classes_per_month  int NOT NULL,
   price_monthly      int NOT NULL,
+  is_trial           boolean NOT NULL DEFAULT false, -- plan de prueba: classes_per_month en total, no por cuota
   created_at         timestamptz NOT NULL DEFAULT now()
 );
 
@@ -74,6 +115,7 @@ INSERT INTO public.plans (name, classes_per_month, price_monthly) VALUES
   ('Pack Elite',     20, 94990),
   ('Pack Familia',   9999, 0),
   ('Clases de prueba', 1, 0);
+UPDATE public.plans SET is_trial = true WHERE name = 'Clases de prueba';
 
 
 -- ─────────────────────────────────────────
@@ -85,7 +127,8 @@ CREATE TABLE public.subscriptions (
   plan_id             uuid NOT NULL REFERENCES public.plans(id),
   start_date          date NOT NULL,
   end_date            date NOT NULL,
-  status              text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'expired')),
+  status              text NOT NULL DEFAULT 'active' CHECK (status IN ('scheduled', 'active', 'paused', 'expired')),
+  -- LEGADO: congelado desde 2026-10-05. El saldo real es la vista subscription_class_balance.
   classes_remaining   int NOT NULL DEFAULT 0,
   reset_day           int NOT NULL DEFAULT 1 CHECK (reset_day BETWEEN 1 AND 28),
   created_at          timestamptz NOT NULL DEFAULT now()
@@ -137,6 +180,71 @@ CREATE TRIGGER subscriptions_set_end_date
   BEFORE INSERT ON public.subscriptions
   FOR EACH ROW EXECUTE FUNCTION set_subscription_end_date();
 
+-- Una sola suscripción activa por cliente (en la migración 04 hay además un chequeo previo de duplicados).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_subscriptions_one_active_per_client
+  ON public.subscriptions(client_id) WHERE status = 'active';
+
+-- Al INSERTAR una suscripción activa/programada, su rango no puede pisar el de otra activa o
+-- programada del mismo cliente. Adyacentes sí (start_date nueva = end_date anterior). Solo valida
+-- inserts nuevos: el historial existente no se re-valida. Se llama "a_" para correr antes de
+-- subscriptions_set_end_date; igual calcula su propio fin (start_date + 3 meses).
+CREATE OR REPLACE FUNCTION public.subscriptions_check_overlap()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_end date := (NEW.start_date + interval '3 months')::date;
+BEGIN
+  IF NEW.status IN ('active', 'scheduled') AND EXISTS (
+    SELECT 1 FROM public.subscriptions s
+    WHERE s.client_id = NEW.client_id
+      AND s.status IN ('active', 'scheduled')
+      AND s.start_date < v_end
+      AND s.end_date > NEW.start_date
+  ) THEN
+    RAISE EXCEPTION 'La suscripción se solapa con otra activa o programada del cliente (la nueva debe empezar el día en que termina la anterior)'
+      USING ERRCODE = 'P0003';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS a_subscriptions_check_overlap ON public.subscriptions;
+CREATE TRIGGER a_subscriptions_check_overlap
+  BEFORE INSERT ON public.subscriptions
+  FOR EACH ROW EXECUTE FUNCTION public.subscriptions_check_overlap();
+
+-- Job idempotente: (1) finaliza lo que llegó a end_date, (2) activa las programadas cuyo
+-- start_date ya llegó y el cliente quedó sin activa. Orden importa por el índice único.
+-- "Hoy" = fecha de Santiago. Devuelve cuántas filas cambió.
+CREATE OR REPLACE FUNCTION public.roll_subscriptions()
+RETURNS int AS $$
+DECLARE
+  v_today     date := (now() AT TIME ZONE 'America/Santiago')::date;
+  v_expired   int;
+  v_activated int;
+BEGIN
+  UPDATE public.subscriptions
+  SET status = 'expired'
+  WHERE status IN ('active', 'paused', 'scheduled') AND end_date <= v_today;
+  GET DIAGNOSTICS v_expired = ROW_COUNT;
+
+  UPDATE public.subscriptions s
+  SET status = 'active'
+  WHERE s.status = 'scheduled'
+    AND s.start_date <= v_today
+    AND NOT EXISTS (SELECT 1 FROM public.subscriptions a
+                    WHERE a.client_id = s.client_id AND a.status = 'active');
+  GET DIAGNOSTICS v_activated = ROW_COUNT;
+
+  RETURN v_expired + v_activated;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE ALL ON FUNCTION public.roll_subscriptions() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.roll_subscriptions() TO service_role;
+
+SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'roll-subscriptions';
+SELECT cron.schedule('roll-subscriptions', '*/15 * * * *', 'SELECT public.roll_subscriptions()');
+
 
 -- ─────────────────────────────────────────
 -- 4. PAGOS
@@ -147,6 +255,7 @@ CREATE TABLE public.payments (
   subscription_id  uuid NOT NULL REFERENCES public.subscriptions(id) ON DELETE CASCADE,
   amount           int NOT NULL,
   month            date NOT NULL, -- primer día del mes pagado (ej: 2025-05-01)
+  due_date         date NOT NULL, -- "vencido" se calcula: status = 'pending' y due_date < hoy
   status           text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'overdue')),
   paid_at          timestamptz,
   notes            text,
@@ -155,6 +264,7 @@ CREATE TABLE public.payments (
 
 CREATE INDEX idx_payments_client ON public.payments(client_id);
 CREATE INDEX idx_payments_status ON public.payments(status);
+CREATE INDEX idx_payments_due_date ON public.payments(due_date);
 
 -- Trigger: al crear una suscripción, genera automáticamente los 3 pagos mensuales
 -- correspondientes (mismo monto que el precio del plan, uno por cada mes que cubre la
@@ -167,18 +277,32 @@ DECLARE
 BEGIN
   SELECT price_monthly INTO v_price FROM public.plans WHERE id = NEW.plan_id;
 
-  INSERT INTO public.payments (client_id, subscription_id, amount, month, status, notes)
+  INSERT INTO public.payments (client_id, subscription_id, amount, month, due_date, status, notes)
   VALUES
-    (NEW.client_id, NEW.id, v_price, NEW.start_date, 'pending',
-      'Generado automáticamente al crear suscripción'),
-    (NEW.client_id, NEW.id, v_price, (NEW.start_date + interval '1 month')::date, 'pending',
-      'Generado automáticamente al crear suscripción'),
-    (NEW.client_id, NEW.id, v_price, (NEW.start_date + interval '2 months')::date, 'pending',
-      'Generado automáticamente al crear suscripción');
+    (NEW.client_id, NEW.id, v_price, NEW.start_date,
+      NEW.start_date, 'pending', 'Generado automáticamente al crear suscripción'),
+    (NEW.client_id, NEW.id, v_price, (NEW.start_date + interval '1 month')::date,
+      (NEW.start_date + interval '1 month')::date, 'pending', 'Generado automáticamente al crear suscripción'),
+    (NEW.client_id, NEW.id, v_price, (NEW.start_date + interval '2 months')::date,
+      (NEW.start_date + interval '2 months')::date, 'pending', 'Generado automáticamente al crear suscripción');
 
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Pagos creados a mano desde el panel (CreatePaymentForm) no mandan due_date: por defecto = month.
+CREATE OR REPLACE FUNCTION public.payments_default_due_date()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.due_date := COALESCE(NEW.due_date, NEW.month);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS payments_default_due_date ON public.payments;
+CREATE TRIGGER payments_default_due_date
+  BEFORE INSERT ON public.payments
+  FOR EACH ROW EXECUTE FUNCTION public.payments_default_due_date();
 
 CREATE TRIGGER subscriptions_generate_payments
   AFTER INSERT ON public.subscriptions
@@ -275,10 +399,11 @@ CREATE TABLE public.bookings (
   client_id        uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   time_block_id    uuid NOT NULL REFERENCES public.time_blocks(id) ON DELETE CASCADE,
   status           text NOT NULL DEFAULT 'pending'
-                   CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'completed')),
+                   CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'completed', 'no_show')),
   rejection_reason text,
   notified_at      timestamptz,
   reminder_sent    boolean NOT NULL DEFAULT false,
+  late_cancel      boolean NOT NULL DEFAULT false, -- cancelada con < 4 h: cuenta como clase usada (lo fija bookings_guard)
   created_at       timestamptz NOT NULL DEFAULT now(),
   updated_at       timestamptz NOT NULL DEFAULT now(),
   UNIQUE (client_id, time_block_id)
@@ -292,26 +417,78 @@ CREATE TRIGGER bookings_updated_at
   BEFORE UPDATE ON public.bookings
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
--- Trigger: actualiza current_count en time_blocks cuando se aprueba/cancela una reserva
-CREATE OR REPLACE FUNCTION sync_block_count()
+-- ── Guarda de bookings ───────────────────────────────────────────────────────
+-- 1) late_cancel lo decide la base, no el cliente: al pasar a 'cancelled' desde pending/approved
+--    se calcula con start_time del bloque (< 4 h → true). Un admin puede fijarlo a mano
+--    explícitamente (p.ej. condonar una cancelación tardía); si no lo toca, se calcula igual.
+-- 2) Un cliente (no admin) solo puede cambiar status a 'cancelled' (y solo desde pending/approved:
+--    no puede "des-completar" una clase para recuperarla). Ninguna otra columna.
+-- 3) Al salir de 'cancelled', late_cancel se limpia.
+-- auth.uid() IS NULL = SQL Editor / pg_cron / service_role: privilegiado.
+CREATE OR REPLACE FUNCTION public.bookings_guard()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_privileged boolean := (auth.uid() IS NULL OR public.is_admin());
+  v_start      timestamptz;
 BEGIN
-  -- Al aprobar una reserva
-  IF NEW.status = 'approved' AND (OLD.status IS NULL OR OLD.status != 'approved') THEN
-    UPDATE public.time_blocks
-    SET current_count = current_count + 1
-    WHERE id = NEW.time_block_id;
+  IF TG_OP = 'INSERT' THEN
+    IF NOT v_privileged THEN NEW.late_cancel := false; END IF;
+    RETURN NEW;
+  END IF;
 
-  -- Al cancelar o rechazar una reserva que estaba aprobada
-  ELSIF OLD.status = 'approved' AND NEW.status IN ('cancelled', 'rejected') THEN
-    UPDATE public.time_blocks
-    SET current_count = GREATEST(current_count - 1, 0)
-    WHERE id = NEW.time_block_id;
+  IF NOT v_privileged THEN
+    IF NEW.client_id        IS DISTINCT FROM OLD.client_id
+       OR NEW.time_block_id IS DISTINCT FROM OLD.time_block_id
+       OR NEW.rejection_reason IS DISTINCT FROM OLD.rejection_reason
+       OR NEW.notified_at   IS DISTINCT FROM OLD.notified_at
+       OR NEW.reminder_sent IS DISTINCT FROM OLD.reminder_sent
+       OR NEW.created_at    IS DISTINCT FROM OLD.created_at THEN
+      RAISE EXCEPTION 'No autorizado a modificar esa columna de la reserva' USING ERRCODE = '42501';
+    END IF;
+    IF NEW.status IS DISTINCT FROM OLD.status
+       AND NOT (NEW.status = 'cancelled' AND OLD.status IN ('pending', 'approved')) THEN
+      RAISE EXCEPTION 'Solo puedes cancelar una reserva pendiente o aprobada' USING ERRCODE = '42501';
+    END IF;
+    NEW.late_cancel := OLD.late_cancel;  -- el cliente no controla late_cancel
+  END IF;
+
+  IF NEW.status = 'cancelled' AND OLD.status IS DISTINCT FROM 'cancelled' THEN
+    IF OLD.status IN ('pending', 'approved') AND NEW.late_cancel IS NOT DISTINCT FROM OLD.late_cancel THEN
+      SELECT start_time INTO v_start FROM public.time_blocks WHERE id = NEW.time_block_id;
+      NEW.late_cancel := (v_start - now()) < interval '4 hours';
+    END IF;
+  ELSIF NEW.status <> 'cancelled' THEN
+    NEW.late_cancel := false;
   END IF;
 
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;  -- DEFINER: un cliente no ve bloques inactivos por RLS
+
+DROP TRIGGER IF EXISTS bookings_guard ON public.bookings;
+CREATE TRIGGER bookings_guard
+  BEFORE INSERT OR UPDATE ON public.bookings
+  FOR EACH ROW EXECUTE FUNCTION public.bookings_guard();
+
+-- Trigger: actualiza current_count en time_blocks cuando se aprueba/cancela una reserva
+-- Ocupan cupo approved/completed/no_show (así corregir un estado no cuenta dos veces).
+CREATE OR REPLACE FUNCTION public.sync_block_count()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_new_occ boolean := NEW.status IN ('approved', 'completed', 'no_show');
+  v_old_occ boolean := (TG_OP = 'UPDATE' AND OLD.status IN ('approved', 'completed', 'no_show'));
+BEGIN
+  IF v_new_occ AND NOT v_old_occ THEN
+    UPDATE public.time_blocks SET current_count = current_count + 1 WHERE id = NEW.time_block_id;
+  ELSIF v_old_occ AND NOT v_new_occ THEN
+    UPDATE public.time_blocks SET current_count = GREATEST(current_count - 1, 0) WHERE id = NEW.time_block_id;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+-- SECURITY DEFINER: antes corría con los permisos de quien cancela, y como un cliente no tiene
+-- UPDATE sobre time_blocks (RLS), al cancelar el contador NO se decrementaba y el cupo quedaba
+-- ocupado. (La ruta de insert sí funcionaba porque book_time_block ya es definer.)
 
 CREATE TRIGGER bookings_sync_count
   AFTER UPDATE ON public.bookings
@@ -324,58 +501,31 @@ CREATE TRIGGER bookings_sync_count_insert
   AFTER INSERT ON public.bookings
   FOR EACH ROW EXECUTE FUNCTION sync_block_count();
 
--- Función: descuenta atómicamente 1 clase de la suscripción activa de un cliente (sin
--- read-then-write, para no perder un descuento si dos llamadas corren en paralelo, p.ej.
--- completeBooking manual y el cron complete_past_bookings al mismo tiempo). Devuelve true
--- si efectivamente descontó (false si el cliente no tiene suscripción activa con saldo, o
--- es un plan ilimitado).
-CREATE OR REPLACE FUNCTION public.decrement_subscription_classes(p_client_id uuid)
-RETURNS boolean AS $$
-DECLARE
-  v_updated int;
-BEGIN
-  UPDATE public.subscriptions
-  SET classes_remaining = classes_remaining - 1
-  WHERE client_id = p_client_id
-    AND status = 'active'
-    AND classes_remaining > 0
-    AND classes_remaining < 9999; -- planes ilimitados no se tocan
+-- decrement_subscription_classes() (descuento sobre el contador legado) fue DEPRECADA el 2026-10-05
+-- y ya no forma parte del schema: el saldo se deriva de los estados de bookings (ver
+-- subscription_class_balance al final). Sigue existiendo en bases migradas, sin uso.
 
-  GET DIAGNOSTICS v_updated = ROW_COUNT;
-  RETURN v_updated > 0;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Función: completa automáticamente las reservas 'approved' cuyo bloque horario ya pasó, y
--- recién en ese momento descuenta 1 clase de la suscripción activa del cliente. El descuento
--- ya NO ocurre al reservar ni al aprobar (ver requestBooking/approveBooking) — solo cuando la
--- clase efectivamente ocurrió o un admin la marca completada a mano (completeBooking). Corre
--- periódicamente vía pg_cron, mismo patrón que monthly_classes_reset.
+-- Función: completa las reservas 'approved' cuyo bloque ya pasó, SIN descontar nada (el saldo se
+-- deriva de los estados). Corre vía pg_cron cada 5 min. Corregir después a no_show/cancelled es un
+-- UPDATE de status y el saldo queda consistente solo.
 CREATE OR REPLACE FUNCTION public.complete_past_bookings()
 RETURNS int AS $$
 DECLARE
-  v_count int := 0;
-  b RECORD;
+  v_count int;
 BEGIN
-  FOR b IN
-    SELECT bk.id, bk.client_id
-    FROM public.bookings bk
-    JOIN public.time_blocks tb ON tb.id = bk.time_block_id
-    WHERE bk.status = 'approved'
-      AND tb.start_time <= now()
-  LOOP
-    UPDATE public.bookings
+  WITH done AS (
+    UPDATE public.bookings bk
     SET status = 'completed', updated_at = now()
-    WHERE id = b.id;
-
-    PERFORM public.decrement_subscription_classes(b.client_id);
-
-    v_count := v_count + 1;
-  END LOOP;
-
+    FROM public.time_blocks tb
+    WHERE tb.id = bk.time_block_id
+      AND bk.status = 'approved'
+      AND tb.start_time <= now()
+    RETURNING bk.id
+  )
+  SELECT count(*) INTO v_count FROM done;
   RETURN v_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Activa el cron, cada 5 minutos. Si ya existe un job con este nombre, re-ejecutar este
 -- SELECT no falla gracias a unschedule previo (evita duplicarlo en reseeds del schema).
@@ -535,10 +685,9 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Activa el cron, todos los días a las 00:05. El unschedule previo evita duplicar el job
--- si este schema se vuelve a ejecutar.
-SELECT cron.unschedule(jobid) FROM cron.job WHERE jobname = 'monthly-classes-reset';
-SELECT cron.schedule('monthly-classes-reset', '5 0 * * *', 'SELECT monthly_classes_reset()');
+-- DEPRECADO (2026-10-05): el cron 'monthly-classes-reset' se desactivó. El derecho mensual lo da la
+-- fórmula de subscription_class_balance (classes_per_month × cuotas iniciadas). La función queda
+-- definida solo por si hay que volver atrás; no se agenda.
 
 
 -- ─────────────────────────────────────────
@@ -624,3 +773,162 @@ CREATE POLICY "Cliente lee sus exercise_logs" ON public.exercise_logs FOR SELECT
 -- MEASUREMENTS
 CREATE POLICY "Admin gestiona medidas"     ON public.measurements FOR ALL USING (is_admin());
 CREATE POLICY "Cliente lee sus medidas"    ON public.measurements FOR SELECT USING (client_id = auth.uid());
+
+
+-- ─────────────────────────────────────────
+-- 12. AJUSTES DE CLASES Y SALDO DERIVADO
+-- ─────────────────────────────────────────
+-- Saldo = derecho del plan (classes_per_month × cuotas iniciadas) + ajustes − usadas (completed,
+-- no_show, cancelled+late_cancel por cliente y rango [start_date, end_date)). Modelo completo en
+-- supabase/migrations/2026-10-05_05_class_adjustments_and_balance.sql.
+-- reason: texto libre; sugeridos: recuperación, cortesía, corrección, reagendada, arrastre.
+CREATE TABLE IF NOT EXISTS public.class_adjustments (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscription_id  uuid NOT NULL REFERENCES public.subscriptions(id) ON DELETE CASCADE,
+  quantity         int  NOT NULL CHECK (quantity <> 0),            -- + suma clases, - resta
+  reason           text NOT NULL CHECK (length(btrim(reason)) > 0),
+  booking_id       uuid REFERENCES public.bookings(id) ON DELETE SET NULL,
+  created_by       uuid REFERENCES public.profiles(id) ON DELETE SET NULL DEFAULT auth.uid(),
+  created_at       timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_class_adjustments_subscription ON public.class_adjustments(subscription_id);
+CREATE INDEX IF NOT EXISTS idx_class_adjustments_booking ON public.class_adjustments(booking_id);
+
+ALTER TABLE public.class_adjustments ENABLE ROW LEVEL SECURITY;
+-- Los privilegios de tabla los da Supabase por defecto; se explicitan acá y el RLS decide quién
+-- escribe (solo admin) y qué ve cada cliente (solo lo suyo).
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.class_adjustments TO authenticated;
+
+CREATE POLICY "Admin gestiona ajustes de clases" ON public.class_adjustments
+  FOR ALL USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY "Cliente lee sus ajustes de clases" ON public.class_adjustments
+  FOR SELECT USING (EXISTS (
+    SELECT 1 FROM public.subscriptions s
+    WHERE s.id = subscription_id AND s.client_id = auth.uid()
+  ));
+
+
+-- ── Vista interna con el cálculo (sin filtro por usuario) ────────────────────
+-- Es la única fuente del saldo. No es accesible desde la API: solo la leen las vistas públicas
+-- de abajo (que filtran por usuario) y el SQL Editor / service_role.
+CREATE OR REPLACE VIEW public._subscription_balance_calc AS
+WITH
+today AS (SELECT (now() AT TIME ZONE 'America/Santiago')::date AS d),
+
+used_classes AS (
+  SELECT a.subscription_id, count(*)::int AS used
+  FROM (
+    SELECT bk.client_id, (tb.start_time AT TIME ZONE 'America/Santiago')::date AS class_date
+    FROM public.bookings bk
+    JOIN public.time_blocks tb ON tb.id = bk.time_block_id
+    WHERE bk.status IN ('completed', 'no_show')
+       OR (bk.status = 'cancelled' AND bk.late_cancel)
+  ) c
+  CROSS JOIN LATERAL (
+    SELECT s.id AS subscription_id
+    FROM public.subscriptions s
+    WHERE s.client_id = c.client_id
+      AND c.class_date >= s.start_date AND c.class_date < s.end_date
+    ORDER BY s.start_date DESC, s.created_at DESC
+    LIMIT 1
+  ) a
+  GROUP BY a.subscription_id
+),
+
+adj AS (
+  SELECT subscription_id, sum(quantity)::int AS adjustments
+  FROM public.class_adjustments GROUP BY subscription_id
+),
+
+base AS (
+  SELECT
+    s.id AS subscription_id, s.client_id, s.plan_id, p.name AS plan_name,
+    s.status, s.start_date, s.end_date, t.d AS as_of,
+    (p.classes_per_month >= 9999) AS is_unlimited,
+    p.classes_per_month AS plan_classes_per_month,
+    ((t.d >= s.start_date)::int
+      + (t.d >= (s.start_date + interval '1 month')::date)::int
+      + (t.d >= (s.start_date + interval '2 months')::date)::int) AS installments_started,
+    CASE
+      WHEN p.classes_per_month >= 9999 THEN NULL
+      WHEN p.is_trial THEN CASE WHEN t.d >= s.start_date THEN p.classes_per_month ELSE 0 END
+      ELSE p.classes_per_month * (
+        (t.d >= s.start_date)::int
+        + (t.d >= (s.start_date + interval '1 month')::date)::int
+        + (t.d >= (s.start_date + interval '2 months')::date)::int)
+    END AS entitled,
+    COALESCE(ad.adjustments, 0) AS adjustments,
+    COALESCE(u.used, 0)         AS used,
+    -- vigente: activa que aún no llegó a end_date (se ignora start_date para no cambiar el
+    -- comportamiento de activas con inicio futuro creadas antes de existir 'scheduled'), o
+    -- programada cuyo rango ya incluye hoy (cubre el retraso del cron al cambiar de día).
+    ((s.status = 'active' AND t.d < s.end_date)
+      OR (s.status = 'scheduled' AND t.d >= s.start_date AND t.d < s.end_date)) AS is_current
+  FROM public.subscriptions s
+  JOIN public.plans p ON p.id = s.plan_id
+  CROSS JOIN today t
+  LEFT JOIN used_classes u ON u.subscription_id = s.id
+  LEFT JOIN adj ad ON ad.subscription_id = s.id
+)
+SELECT
+  b.subscription_id, b.client_id, b.plan_id, b.plan_name, b.status, b.start_date, b.end_date, b.as_of,
+  b.is_unlimited, b.plan_classes_per_month, b.installments_started,
+  b.entitled, b.adjustments, b.used,
+  CASE WHEN b.is_unlimited THEN NULL ELSE b.entitled + b.adjustments - b.used END AS balance,
+  b.is_current,
+  -- Lo que puede reservar hoy: 0 si no es vigente (finalizada, pausada, programada futura).
+  CASE
+    WHEN NOT b.is_current THEN 0
+    WHEN b.is_unlimited   THEN 9999
+    ELSE GREATEST(b.entitled + b.adjustments - b.used, 0)
+  END AS available,
+  -- Informativo: clases que sobraron al cerrar el trimestre y se perdieron. Para suscripciones
+  -- cerradas anticipadamente por el flujo viejo sobrestima (cuenta las 3 cuotas completas).
+  CASE
+    WHEN b.is_unlimited OR b.is_current OR b.status = 'scheduled' THEN 0
+    ELSE GREATEST(b.entitled + b.adjustments - b.used, 0)
+  END AS lost_classes
+FROM base b;
+
+REVOKE ALL ON public._subscription_balance_calc FROM PUBLIC, anon, authenticated;
+
+-- ── Vista pública: saldo por suscripción ────────────────────────────────────
+-- Corre con permisos del dueño (necesita ver reservas/bloques inactivos que el RLS le oculta a
+-- un cliente) pero SOLO devuelve filas del usuario que consulta, o todas si es admin.
+-- Uso: SELECT available FROM subscription_class_balance WHERE is_current;
+CREATE OR REPLACE VIEW public.subscription_class_balance
+WITH (security_invoker = false) AS
+SELECT * FROM public._subscription_balance_calc
+WHERE client_id = auth.uid() OR public.is_admin();
+
+-- ── Vista pública: historial de suscripciones por cliente (más reciente primero) ──
+-- effective_status refleja las fechas aunque el cron no haya corrido todavía.
+-- Uso: SELECT * FROM subscription_history WHERE client_id = '<uuid>';
+CREATE OR REPLACE VIEW public.subscription_history
+WITH (security_invoker = false) AS
+SELECT
+  c.client_id, c.subscription_id, c.plan_name, c.start_date, c.end_date, c.status,
+  CASE
+    WHEN c.status = 'active'    AND c.as_of >= c.end_date THEN 'expired'
+    WHEN c.status = 'scheduled' AND c.is_current          THEN 'active'
+    ELSE c.status
+  END AS effective_status,
+  c.entitled, c.adjustments, c.used, c.balance, c.lost_classes,
+  COALESCE(pay.paid, 0)    AS payments_paid,
+  COALESCE(pay.pending, 0) AS payments_pending,
+  COALESCE(pay.overdue, 0) AS payments_overdue   -- calculado: pending con due_date < hoy
+FROM public._subscription_balance_calc c
+LEFT JOIN LATERAL (
+  SELECT
+    count(*) FILTER (WHERE p.status = 'paid')                                  AS paid,
+    count(*) FILTER (WHERE p.status <> 'paid')                                 AS pending,
+    count(*) FILTER (WHERE p.status <> 'paid' AND p.due_date < c.as_of)        AS overdue
+  FROM public.payments p WHERE p.subscription_id = c.subscription_id
+) pay ON true
+WHERE c.client_id = auth.uid() OR public.is_admin()
+ORDER BY c.client_id, c.start_date DESC, c.subscription_id;
+
+GRANT SELECT ON public.subscription_class_balance, public.subscription_history TO authenticated;
+REVOKE ALL ON public.subscription_class_balance, public.subscription_history FROM anon;

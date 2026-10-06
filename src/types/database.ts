@@ -6,6 +6,9 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[]
 
+export type SubscriptionStatus = 'scheduled' | 'active' | 'paused' | 'expired'
+export type BookingStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed' | 'no_show'
+
 export type Database = {
   public: {
     Tables: {
@@ -17,6 +20,7 @@ export type Database = {
           phone: string | null
           role: 'admin' | 'client'
           notify_via: 'whatsapp' | 'gmail'
+          birth_date: string | null // la edad se calcula desde acá (src/lib/age.ts); NULL en clientes antiguos
           created_at: string
           updated_at: string
         }
@@ -27,6 +31,7 @@ export type Database = {
           phone?: string | null
           role?: 'admin' | 'client'
           notify_via?: 'whatsapp' | 'gmail'
+          birth_date?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -36,6 +41,7 @@ export type Database = {
           phone?: string | null
           role?: 'admin' | 'client'
           notify_via?: 'whatsapp' | 'gmail'
+          birth_date?: string | null
           updated_at?: string
         }
         Relationships: []
@@ -46,6 +52,7 @@ export type Database = {
           name: string
           classes_per_month: number
           price_monthly: number
+          is_trial: boolean // plan de prueba: classes_per_month en total, no por cuota
           created_at: string
         }
         Insert: {
@@ -53,12 +60,14 @@ export type Database = {
           name: string
           classes_per_month: number
           price_monthly: number
+          is_trial?: boolean
           created_at?: string
         }
         Update: {
           name?: string
           classes_per_month?: number
           price_monthly?: number
+          is_trial?: boolean
         }
         Relationships: []
       }
@@ -69,7 +78,8 @@ export type Database = {
           plan_id: string
           start_date: string
           end_date: string
-          status: 'active' | 'paused' | 'expired'
+          status: SubscriptionStatus
+          /** @deprecated legado: congelado desde 2026-10-05. El saldo real está en la vista subscription_class_balance. */
           classes_remaining: number
           reset_day: number
           created_at: string
@@ -80,8 +90,8 @@ export type Database = {
           plan_id: string
           start_date: string
           end_date?: string // la calcula el trigger subscriptions_set_end_date (start_date + 3 meses)
-          status?: 'active' | 'paused' | 'expired'
-          classes_remaining: number
+          status?: SubscriptionStatus
+          classes_remaining?: number // legado (default 0); el saldo real sale de subscription_class_balance
           reset_day?: number
           created_at?: string
         }
@@ -89,7 +99,7 @@ export type Database = {
           plan_id?: string
           start_date?: string
           end_date?: string
-          status?: 'active' | 'paused' | 'expired'
+          status?: SubscriptionStatus
           classes_remaining?: number
           reset_day?: number
         }
@@ -117,6 +127,7 @@ export type Database = {
           subscription_id: string
           amount: number
           month: string
+          due_date: string // "vencido" se calcula: status = 'pending' y due_date < hoy
           status: 'pending' | 'paid' | 'overdue'
           paid_at: string | null
           notes: string | null
@@ -128,6 +139,7 @@ export type Database = {
           subscription_id: string
           amount: number
           month: string
+          due_date?: string // por defecto = month (trigger)
           status?: 'pending' | 'paid' | 'overdue'
           paid_at?: string | null
           notes?: string | null
@@ -135,6 +147,7 @@ export type Database = {
         }
         Update: {
           amount?: number
+          due_date?: string
           status?: 'pending' | 'paid' | 'overdue'
           paid_at?: string | null
           notes?: string | null
@@ -145,6 +158,40 @@ export type Database = {
             columns: ['client_id']
             isOneToOne: false
             referencedRelation: 'profiles'
+            referencedColumns: ['id']
+          }
+        ]
+      }
+      class_adjustments: {
+        Row: {
+          id: string
+          subscription_id: string
+          quantity: number // + suma clases, - resta
+          reason: string
+          booking_id: string | null
+          created_by: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          subscription_id: string
+          quantity: number
+          reason: string
+          booking_id?: string | null
+          created_by?: string | null
+          created_at?: string
+        }
+        Update: {
+          quantity?: number
+          reason?: string
+          booking_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'class_adjustments_subscription_id_fkey'
+            columns: ['subscription_id']
+            isOneToOne: false
+            referencedRelation: 'subscriptions'
             referencedColumns: ['id']
           }
         ]
@@ -182,10 +229,11 @@ export type Database = {
           id: string
           client_id: string
           time_block_id: string
-          status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed'
+          status: BookingStatus
           rejection_reason: string | null
           notified_at: string | null
           reminder_sent: boolean
+          late_cancel: boolean // cancelada con < 4 h de anticipación: cuenta como clase usada (lo fija un trigger)
           created_at: string
           updated_at: string
         }
@@ -193,18 +241,20 @@ export type Database = {
           id?: string
           client_id: string
           time_block_id: string
-          status?: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed'
+          status?: BookingStatus
           rejection_reason?: string | null
           notified_at?: string | null
           reminder_sent?: boolean
+          late_cancel?: boolean
           created_at?: string
           updated_at?: string
         }
         Update: {
-          status?: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed'
+          status?: BookingStatus
           rejection_reason?: string | null
           notified_at?: string | null
           reminder_sent?: boolean
+          late_cancel?: boolean
           updated_at?: string
         }
         Relationships: [
@@ -428,7 +478,53 @@ export type Database = {
         ]
       }
     }
-    Views: Record<string, never>
+    Views: {
+      // Saldo de clases por suscripción (ver supabase/migrations/2026-10-05_05_*). Cada usuario ve
+      // solo las suyas; el admin todas. Usar `available` donde antes se leía classes_remaining.
+      subscription_class_balance: {
+        Row: {
+          subscription_id: string
+          client_id: string
+          plan_id: string
+          plan_name: string
+          status: SubscriptionStatus
+          start_date: string
+          end_date: string
+          as_of: string
+          is_unlimited: boolean
+          plan_classes_per_month: number
+          installments_started: number
+          entitled: number | null
+          adjustments: number
+          used: number
+          balance: number | null
+          is_current: boolean
+          available: number // 0 si no es vigente; 9999 si es ilimitado
+          lost_classes: number
+        }
+        Relationships: []
+      }
+      subscription_history: {
+        Row: {
+          client_id: string
+          subscription_id: string
+          plan_name: string
+          start_date: string
+          end_date: string
+          status: SubscriptionStatus
+          effective_status: SubscriptionStatus
+          entitled: number | null
+          adjustments: number
+          used: number
+          balance: number | null
+          lost_classes: number
+          payments_paid: number
+          payments_pending: number
+          payments_overdue: number
+        }
+        Relationships: []
+      }
+    }
     Functions: {
       generate_time_blocks: {
         Args: { p_start_date: string; p_end_date: string; p_timezone?: string }
@@ -454,6 +550,11 @@ export type Database = {
         Args: Record<string, never>
         Returns: number
       }
+      roll_subscriptions: {
+        Args: Record<string, never>
+        Returns: number
+      }
+      /** @deprecated nada la llama desde 2026-10-05; el saldo se deriva de subscription_class_balance */
       decrement_subscription_classes: {
         Args: { p_client_id: string }
         Returns: boolean
@@ -476,3 +577,6 @@ export type Exercise = Database['public']['Tables']['exercises']['Row']
 export type TrainingLog = Database['public']['Tables']['training_logs']['Row']
 export type ExerciseLog = Database['public']['Tables']['exercise_logs']['Row']
 export type Measurement = Database['public']['Tables']['measurements']['Row']
+export type ClassAdjustment = Database['public']['Tables']['class_adjustments']['Row']
+export type SubscriptionClassBalance = Database['public']['Views']['subscription_class_balance']['Row']
+export type SubscriptionHistoryRow = Database['public']['Views']['subscription_history']['Row']

@@ -12,11 +12,14 @@ export default async function DashboardPage() {
 
   const [profileRes, subscriptionRes, nextBookingRes, monthlyBookingsRes] = await Promise.all([
     supabase.from('profiles').select('full_name').eq('id', user!.id).single(),
+    // Saldo derivado (plan + ajustes - usadas); is_current = suscripción vigente hoy.
     supabase
-      .from('subscriptions')
-      .select('classes_remaining, status, plans(name)')
+      .from('subscription_class_balance')
+      .select('available, is_unlimited, plan_name')
       .eq('client_id', user!.id)
-      .eq('status', 'active')
+      .eq('is_current', true)
+      .order('start_date', { ascending: false })
+      .limit(1)
       .maybeSingle(),
     supabase
       .from('bookings')
@@ -41,7 +44,7 @@ export default async function DashboardPage() {
   const nextBookingData = nextBookingRes.data
   const monthlyCount = monthlyBookingsRes.data?.length ?? 0
 
-  const planName = (subscription?.plans as { name: string } | null)?.name
+  const planName = subscription?.plan_name
   const firstName = profile?.full_name?.split(' ')[0] ?? 'Cliente'
   const initials = profile?.full_name
     ?.split(' ')
@@ -109,7 +112,7 @@ export default async function DashboardPage() {
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-white/15 rounded-xl p-3">
             <p className="text-2xl font-bold leading-none">
-              {subscription?.classes_remaining ?? '—'}
+              {subscription ? (subscription.is_unlimited ? '∞' : subscription.available) : '—'}
             </p>
             <p className="text-[11px] text-white/70 mt-1 leading-tight">Clases restantes</p>
           </div>

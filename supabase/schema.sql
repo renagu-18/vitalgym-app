@@ -433,7 +433,8 @@ CREATE TRIGGER bookings_updated_at
 CREATE OR REPLACE FUNCTION public.bookings_guard()
 RETURNS TRIGGER AS $$
 DECLARE
-  v_privileged boolean := (auth.uid() IS NULL OR public.is_admin());
+  v_privileged boolean := (auth.uid() IS NULL OR public.is_admin()
+                           OR current_setting('app.rebooking', true) = 'on');
   v_start      timestamptz;
 BEGIN
   IF TG_OP = 'INSERT' THEN
@@ -564,6 +565,20 @@ BEGIN
 
   IF v_current_count >= v_max_capacity THEN
     RAISE EXCEPTION 'Este bloque ya no tiene cupos disponibles' USING ERRCODE = 'P0002';
+  END IF;
+
+  -- Reagendar: reactivar la reserva cancelada/rechazada del mismo cliente y bloque.
+  PERFORM set_config('app.rebooking', 'on', true);
+  UPDATE public.bookings
+  SET status = 'approved', notified_at = now(), reminder_sent = false, rejection_reason = NULL
+  WHERE client_id = auth.uid()
+    AND time_block_id = p_time_block_id
+    AND status IN ('cancelled', 'rejected')
+  RETURNING id INTO v_booking_id;
+  PERFORM set_config('app.rebooking', 'off', true);
+
+  IF v_booking_id IS NOT NULL THEN
+    RETURN v_booking_id;
   END IF;
 
   INSERT INTO public.bookings (client_id, time_block_id, status, notified_at)

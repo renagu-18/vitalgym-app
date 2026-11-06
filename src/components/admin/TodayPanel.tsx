@@ -6,6 +6,7 @@ import { X, Clock, Dumbbell, History, Loader2 } from 'lucide-react'
 import RoutineEditor from '@/components/training/RoutineEditor'
 import { setBookingAttendance, returnClass } from '@/app/admin/classes/actions'
 import type { RefundReason } from '@/lib/class-adjustments'
+import { useEscapeKey } from '@/lib/use-escape-key'
 
 const TZ = 'America/Santiago'
 
@@ -70,6 +71,7 @@ function fmtDate(dateStr: string) {
 export default function TodayPanel({ entries }: Props) {
   const [selected, setSelected] = useState<TodayEntry | null>(null)
   const [tab, setTab] = useState<'routine' | 'history'>('routine')
+  useEscapeKey(() => setSelected(null), selected !== null)
 
   function openClient(entry: TodayEntry) {
     setSelected(entry)

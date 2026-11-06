@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, X, Loader2, CalendarDays } from 'lucide-react'
 import { requestBooking, cancelBooking } from '@/app/calendar/actions'
 import type { TimeBlock, Booking } from '@/types/database'
+import { useEscapeKey } from '@/lib/use-escape-key'
 
 type BlockStatus =
   | 'available' | 'full' | 'past' | 'too-soon'
@@ -429,6 +430,8 @@ function BookingModal({
   onConfirm: () => void
   onClose: () => void
 }) {
+  useEscapeKey(onClose)
+
   const dateLabel = new Date(block.start_time).toLocaleDateString('es-CL', {
     weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ,
   })

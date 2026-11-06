@@ -21,6 +21,8 @@ export type Database = {
           role: 'admin' | 'client'
           notify_via: 'whatsapp' | 'gmail'
           birth_date: string | null // la edad se calcula desde acá (src/lib/age.ts); NULL en clientes antiguos
+          rules_accepted_at: string | null      // NULL = reglamento pendiente (src/lib/rules.ts)
+          rules_accepted_version: number | null // se escribe solo vía accept_rules()
           created_at: string
           updated_at: string
         }
@@ -32,6 +34,8 @@ export type Database = {
           role?: 'admin' | 'client'
           notify_via?: 'whatsapp' | 'gmail'
           birth_date?: string | null
+          rules_accepted_at?: string | null
+          rules_accepted_version?: number | null
           created_at?: string
           updated_at?: string
         }
@@ -551,6 +555,10 @@ export type Database = {
       }
       book_time_block: {
         Args: { p_time_block_id: string }
+        Returns: string
+      }
+      accept_rules: {
+        Args: { p_version: number }
         Returns: string
       }
       complete_past_bookings: {

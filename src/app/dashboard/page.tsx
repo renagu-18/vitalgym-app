@@ -1,6 +1,9 @@
 import { createClient } from '@/lib/supabase/server'
 import { CalendarDays, Dumbbell, Ruler, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
+import RulesCard from '@/components/rules/RulesCard'
+import RulesAcceptance from '@/components/rules/RulesAcceptance'
+import { needsRulesAcceptance } from '@/lib/rules'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -10,8 +13,10 @@ export default async function DashboardPage() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString()
 
-  const [profileRes, subscriptionRes, nextBookingRes, monthlyBookingsRes] = await Promise.all([
+  const [profileRes, rulesRes, subscriptionRes, nextBookingRes, monthlyBookingsRes] = await Promise.all([
     supabase.from('profiles').select('full_name').eq('id', user!.id).single(),
+    // Consulta aparte: si la migración del reglamento aún no está aplicada, solo se omite el aviso.
+    supabase.from('profiles').select('rules_accepted_version').eq('id', user!.id).maybeSingle(),
     // Saldo derivado (plan + ajustes - usadas); is_current = suscripción vigente hoy.
     supabase
       .from('subscription_class_balance')
@@ -43,6 +48,7 @@ export default async function DashboardPage() {
   const subscription = subscriptionRes.data
   const nextBookingData = nextBookingRes.data
   const monthlyCount = monthlyBookingsRes.data?.length ?? 0
+  const showRulesAcceptance = !rulesRes.error && needsRulesAcceptance(rulesRes.data?.rules_accepted_version)
 
   const planName = subscription?.plan_name
   const firstName = profile?.full_name?.split(' ')[0] ?? 'Cliente'
@@ -211,6 +217,11 @@ export default async function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* ── Reglas del gimnasio ───────────────────────────────── */}
+      <RulesCard />
+
+      {showRulesAcceptance && <RulesAcceptance userId={user!.id} />}
 
     </div>
   )

@@ -5,6 +5,7 @@ import SubscriptionManager from '@/components/admin/SubscriptionManager'
 import SubscriptionHistory from '@/components/admin/SubscriptionHistory'
 import ClassBalanceCard, { type AdjustmentRow, type ReturnableBooking } from '@/components/admin/ClassBalanceCard'
 import type { SubscriptionStatus } from '@/types/database'
+import { RULES_VERSION } from '@/lib/rules'
 
 interface Props {
   params: Promise<{ clientId: string }>
@@ -22,13 +23,19 @@ export default async function AdminClientDetailPage({ params }: Props) {
   const { clientId } = await params
   const supabase = await createClient()
 
-  const [{ data: profile }, { data: rawSubs }, { data: plans }] = await Promise.all([
+  const [{ data: profile }, { data: rules }, { data: rawSubs }, { data: plans }] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, full_name, phone, notify_via')
       .eq('id', clientId)
       .eq('role', 'client')
       .single(),
+    // Aparte para que la ficha no falle si la migración del reglamento aún no está aplicada.
+    supabase
+      .from('profiles')
+      .select('rules_accepted_at, rules_accepted_version')
+      .eq('id', clientId)
+      .maybeSingle(),
     supabase
       .from('subscriptions')
       .select('id, status, start_date, end_date, plan:plans(id, name, classes_per_month, price_monthly)')
@@ -42,6 +49,16 @@ export default async function AdminClientDetailPage({ params }: Props) {
   ])
 
   if (!profile) notFound()
+
+  // Reglamento: aceptado solo si la versión aceptada es la vigente (NULL = nunca aceptó).
+  const rulesAcceptedAt = rules?.rules_accepted_at ? new Date(rules.rules_accepted_at) : null
+  const rulesVersion = rules?.rules_accepted_version ?? null
+  const rulesAccepted = rulesAcceptedAt !== null && rulesVersion !== null && rulesVersion >= RULES_VERSION
+  const rulesLabel = rulesAccepted
+    ? `Aceptado el ${rulesAcceptedAt.toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'America/Santiago' })} (v${rulesVersion})`
+    : rulesVersion !== null
+      ? `Pendiente (aceptó v${rulesVersion})`
+      : 'Pendiente'
 
   // La vigente; si no hay, la próxima programada.
   const subs = (rawSubs ?? []) as unknown as SubRow[]
@@ -120,6 +137,12 @@ export default async function AdminClientDetailPage({ params }: Props) {
       <div>
         <h2 className="text-xl font-bold text-gray-900">{profile.full_name}</h2>
         {profile.phone && <p className="text-sm text-gray-400">{profile.phone}</p>}
+        <p className="text-xs text-gray-500 mt-1">
+          Reglamento:{' '}
+          <span className={`font-semibold ${rulesAccepted ? 'text-green-600' : 'text-amber-600'}`}>
+            {rulesLabel}
+          </span>
+        </p>
       </div>
 
       <ClientProfileForm

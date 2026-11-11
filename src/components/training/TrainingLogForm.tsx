@@ -3,7 +3,8 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Trash2, Loader2, Check } from 'lucide-react'
-import { createTrainingLog, type ExerciseLogInput } from '@/app/admin/training/[clientId]/actions'
+import { createTrainingLog, updateTrainingLog, type ExerciseLogInput } from '@/app/admin/training/[clientId]/actions'
+import { parsePeso, formatPeso, confirmarPesosAltos } from '@/lib/peso'
 
 interface RoutineExercise {
   id: string
@@ -13,42 +14,81 @@ interface RoutineExercise {
   suggested_weight: string | null
 }
 
+export interface EditableLog {
+  id: string
+  log_date: string
+  notes: string | null
+  exercise_logs: {
+    id: string
+    exercise_id: string | null
+    exercise_name: string
+    sets_done: number | null
+    reps_done: string | null
+    weight_used: string | null
+    notes: string | null
+  }[]
+}
+
 interface Props {
   clientId: string
   routineId: string | null
   routineExercises: RoutineExercise[]
+  /** Si viene, el formulario edita esa sesión (update) en vez de crear una nueva */
+  editLog?: EditableLog | null
   onSuccess?: () => void
 }
 
 interface LogRow extends ExerciseLogInput {
   _key: string
+  /** peso sugerido de la rutina, se muestra como placeholder */
+  suggestedWeight?: string | null
 }
 
+const newKey = () => Math.random().toString(36).slice(2)
+
 function makeRow(ex?: RoutineExercise): LogRow {
+  // El sugerido puede ser texto libre ("60-70 kg"); solo se precarga si es un número.
+  const suggested = ex?.suggested_weight ?? null
   return {
-    _key: Math.random().toString(36).slice(2),
+    _key: newKey(),
     exerciseId: ex?.id ?? null,
     exerciseName: ex?.name ?? '',
     setsDone: ex?.sets ?? null,
     repsDone: ex?.reps ?? '',
-    weightUsed: ex?.suggested_weight ?? '',
+    weightUsed: parsePeso(suggested) !== null ? formatPeso(suggested, false) : '',
+    suggestedWeight: suggested,
     notes: null,
   }
 }
 
-export default function TrainingLogForm({ clientId, routineId, routineExercises, onSuccess }: Props) {
+function rowFromLog(ex: EditableLog['exercise_logs'][number]): LogRow {
+  return {
+    _key: newKey(),
+    id: ex.id,
+    exerciseId: ex.exercise_id,
+    exerciseName: ex.exercise_name,
+    setsDone: ex.sets_done,
+    repsDone: ex.reps_done ?? '',
+    weightUsed: formatPeso(ex.weight_used, false),
+    notes: ex.notes,
+  }
+}
+
+export default function TrainingLogForm({ clientId, routineId, routineExercises, editLog, onSuccess }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
 
   const today = new Date().toISOString().split('T')[0]
-  const [logDate, setLogDate] = useState(today)
-  const [sessionNotes, setSessionNotes] = useState('')
+  const [logDate, setLogDate] = useState(editLog?.log_date ?? today)
+  const [sessionNotes, setSessionNotes] = useState(editLog?.notes ?? '')
   const [rows, setRows] = useState<LogRow[]>(() =>
-    routineExercises.length > 0
-      ? routineExercises.map(ex => makeRow(ex))
-      : [makeRow()]
+    editLog
+      ? (editLog.exercise_logs.length > 0 ? editLog.exercise_logs.map(rowFromLog) : [makeRow()])
+      : routineExercises.length > 0
+        ? routineExercises.map(ex => makeRow(ex))
+        : [makeRow()]
   )
 
   function updateRow(key: string, patch: Partial<LogRow>) {
@@ -67,19 +107,47 @@ export default function TrainingLogForm({ clientId, routineId, routineExercises,
     const validRows = rows.filter(r => r.exerciseName.trim())
     if (validRows.length === 0) { setError('Agrega al menos un ejercicio'); return }
 
+    const invalid = validRows.find(r => r.weightUsed?.trim() && parsePeso(r.weightUsed) === null)
+    if (invalid) {
+      setError(`Peso inválido en "${invalid.exerciseName.trim()}". Escribe solo el número, por ejemplo 32,5`)
+      return
+    }
+    if (!confirmarPesosAltos(validRows.map(r => ({ label: r.exerciseName.trim(), kg: parsePeso(r.weightUsed) })))) return
+
+    const exercises: ExerciseLogInput[] = validRows.map(r => ({
+      id: r.id ?? null,
+      exerciseId: r.exerciseId,
+      exerciseName: r.exerciseName,
+      setsDone: r.setsDone,
+      repsDone: r.repsDone,
+      weightUsed: r.weightUsed,
+      notes: r.notes,
+    }))
     setError(null)
     startTransition(async () => {
-      const res = await createTrainingLog({
-        clientId,
-        logDate,
-        routineId,
-        notes: sessionNotes.trim() || null,
-        exercises: validRows,
-      })
+      const res = editLog
+        ? await updateTrainingLog({
+            logId: editLog.id,
+            clientId,
+            logDate,
+            notes: sessionNotes.trim() || null,
+            exercises,
+          })
+        : await createTrainingLog({
+            clientId,
+            logDate,
+            routineId,
+            notes: sessionNotes.trim() || null,
+            exercises,
+          })
       if (res?.error) { setError(res.error); return }
+      onSuccess?.()
+      if (editLog) {
+        router.push(`/admin/training/${clientId}?tab=history`)
+        return
+      }
       setSuccess(true)
       router.refresh()
-      onSuccess?.()
     })
   }
 
@@ -182,12 +250,13 @@ export default function TrainingLogForm({ clientId, routineId, routineExercises,
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] text-gray-400 mb-0.5">Peso usado</label>
+                  <label className="block text-[10px] text-gray-400 mb-0.5">Peso usado (kg)</label>
                   <input
                     type="text"
+                    inputMode="decimal"
                     value={row.weightUsed ?? ''}
                     onChange={e => updateRow(row._key, { weightUsed: e.target.value })}
-                    placeholder="—"
+                    placeholder={row.suggestedWeight || '—'}
                     className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-sm
                                focus:outline-none focus:ring-2 focus:ring-brand"
                   />
@@ -240,7 +309,7 @@ export default function TrainingLogForm({ clientId, routineId, routineExercises,
       >
         {isPending
           ? <><Loader2 size={16} className="animate-spin" /> Guardando...</>
-          : <><Check size={16} /> Guardar sesión</>
+          : <><Check size={16} /> {editLog ? 'Guardar cambios' : 'Guardar sesión'}</>
         }
       </button>
     </div>

@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { X, Clock, Dumbbell, History, Loader2 } from 'lucide-react'
+import { X, Clock, Dumbbell, History, Loader2, Pencil } from 'lucide-react'
 import RoutineEditor from '@/components/training/RoutineEditor'
 import { setBookingAttendance, returnClass } from '@/app/admin/classes/actions'
 import type { RefundReason } from '@/lib/class-adjustments'
 import { useEscapeKey } from '@/lib/use-escape-key'
+import { formatPeso } from '@/lib/peso'
 
 const TZ = 'America/Santiago'
 
@@ -46,6 +48,7 @@ export interface TodayEntry {
     exercises: ExerciseData[]
   } | null
   lastSessions: {
+    id: string
     date: string
     notes: string | null
     exercises: LastSessionExercise[]
@@ -171,7 +174,7 @@ export default function TodayPanel({ entries }: Props) {
                   allRoutines={selected.allRoutines}
                 />
               ) : (
-                <LastSessionsView sessions={selected.lastSessions} />
+                <LastSessionsView clientId={selected.client.id} sessions={selected.lastSessions} />
               )}
             </div>
           </div>
@@ -256,7 +259,7 @@ function AttendanceActions({ entry }: { entry: TodayEntry }) {
   )
 }
 
-function LastSessionsView({ sessions }: { sessions: TodayEntry['lastSessions'] }) {
+function LastSessionsView({ clientId, sessions }: { clientId: string; sessions: TodayEntry['lastSessions'] }) {
   if (sessions.length === 0) {
     return (
       <div className="bg-white border border-dashed border-gray-200 rounded-xl p-8 text-center">
@@ -267,10 +270,17 @@ function LastSessionsView({ sessions }: { sessions: TodayEntry['lastSessions'] }
 
   return (
     <div className="space-y-3">
-      {sessions.map((session, i) => (
-        <div key={i} className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-50">
+      {sessions.map(session => (
+        <div key={session.id} className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between">
             <p className="text-sm font-semibold text-gray-900 capitalize">{fmtDate(session.date)}</p>
+            <Link
+              href={`/admin/training/${clientId}?tab=log&edit=${session.id}`}
+              aria-label="Editar sesión"
+              className="p-1.5 -m-1.5 text-gray-300 hover:text-gray-600 transition-colors"
+            >
+              <Pencil size={14} />
+            </Link>
           </div>
           {session.exercises.length > 0 ? (
             <div className="divide-y divide-gray-50">
@@ -281,7 +291,7 @@ function LastSessionsView({ sessions }: { sessions: TodayEntry['lastSessions'] }
                     {[
                       ex.sets_done && `${ex.sets_done} series`,
                       ex.reps_done && `× ${ex.reps_done}`,
-                      ex.weight_used && `· ${ex.weight_used}`,
+                      ex.weight_used && `· ${formatPeso(ex.weight_used)}`,
                     ].filter(Boolean).join(' ') || '—'}
                   </p>
                 </div>

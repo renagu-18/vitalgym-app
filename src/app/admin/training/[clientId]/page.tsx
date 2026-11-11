@@ -1,10 +1,11 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { ArrowLeft, Pencil } from 'lucide-react'
 import RoutineEditor from '@/components/training/RoutineEditor'
-import TrainingLogForm from '@/components/training/TrainingLogForm'
+import TrainingLogForm, { type EditableLog } from '@/components/training/TrainingLogForm'
 import DeleteLogButton from '@/components/training/DeleteLogButton'
+import { formatPeso } from '@/lib/peso'
 
 const TZ = 'America/Santiago'
 
@@ -21,10 +22,10 @@ export default async function ClientTrainingPage({
   searchParams,
 }: {
   params: Promise<{ clientId: string }>
-  searchParams: Promise<{ tab?: string }>
+  searchParams: Promise<{ tab?: string; edit?: string }>
 }) {
   const { clientId } = await params
-  const { tab = 'routine' } = await searchParams
+  const { tab = 'routine', edit } = await searchParams
   const activeTab = (tab as Tab) || 'routine'
 
   const supabase = await createClient()
@@ -72,9 +73,24 @@ export default async function ClientTrainingPage({
     .order('log_date', { ascending: false })
     .limit(30)
 
+  // Sesión a editar (?tab=log&edit=<logId>), desde el historial o la ficha de TodayPanel
+  const { data: editLogData } = activeTab === 'log' && edit
+    ? await supabase
+        .from('training_logs')
+        .select(`
+          id, log_date, notes,
+          exercise_logs(id, exercise_id, exercise_name, sets_done, reps_done, weight_used, notes)
+        `)
+        .eq('id', edit)
+        .eq('client_id', clientId)
+        .maybeSingle()
+    : { data: null }
+  const editLog = editLogData as EditableLog | null
+  if (edit && activeTab === 'log' && !editLog) notFound()
+
   const tabs: { id: Tab; label: string }[] = [
     { id: 'routine', label: 'Rutina' },
-    { id: 'log', label: 'Registrar sesión' },
+    { id: 'log', label: editLog ? 'Editar sesión' : 'Registrar sesión' },
     { id: 'history', label: 'Historial' },
   ]
 
@@ -120,11 +136,25 @@ export default async function ClientTrainingPage({
 
       {/* ── Tab: Registrar sesión ── */}
       {activeTab === 'log' && (
-        <TrainingLogForm
-          clientId={clientId}
-          routineId={activeRoutine?.id ?? null}
-          routineExercises={exercises ?? []}
-        />
+        <div className="space-y-3">
+          {editLog && (
+            <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+              <p className="text-sm text-amber-800">
+                Editando la sesión del <span className="font-semibold">{fmtDate(editLog.log_date)}</span>
+              </p>
+              <Link href={`/admin/training/${clientId}?tab=history`} className="text-xs text-amber-700 underline shrink-0">
+                Cancelar
+              </Link>
+            </div>
+          )}
+          <TrainingLogForm
+            key={editLog?.id ?? 'new'}
+            clientId={clientId}
+            routineId={activeRoutine?.id ?? null}
+            routineExercises={exercises ?? []}
+            editLog={editLog}
+          />
+        </div>
       )}
 
       {/* ── Tab: Historial ── */}
@@ -150,7 +180,16 @@ export default async function ClientTrainingPage({
                 <div key={log.id} className="bg-white border border-gray-100 rounded-xl overflow-hidden">
                   <div className="px-4 py-3 flex items-center justify-between border-b border-gray-50">
                     <p className="text-sm font-semibold text-gray-900 capitalize">{fmtDate(log.log_date)}</p>
-                    <DeleteLogButton logId={log.id} clientId={clientId} />
+                    <div className="flex items-center gap-0.5">
+                      <Link
+                        href={`/admin/training/${clientId}?tab=log&edit=${log.id}`}
+                        aria-label="Editar sesión"
+                        className="p-1.5 text-gray-300 hover:text-gray-600 transition-colors"
+                      >
+                        <Pencil size={14} />
+                      </Link>
+                      <DeleteLogButton logId={log.id} clientId={clientId} />
+                    </div>
                   </div>
 
                   {exLogs.length > 0 && (
@@ -164,7 +203,7 @@ export default async function ClientTrainingPage({
                             {[
                               ex.sets_done && `${ex.sets_done} series`,
                               ex.reps_done && `× ${ex.reps_done}`,
-                              ex.weight_used && `· ${ex.weight_used}`,
+                              ex.weight_used && `· ${formatPeso(ex.weight_used)}`,
                             ].filter(Boolean).join(' ') || '—'}
                           </p>
                         </div>

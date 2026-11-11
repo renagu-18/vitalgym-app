@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { Dumbbell, ChevronDown } from 'lucide-react'
 import ProgressSection from '@/components/training/ProgressSection'
+import { parsePeso, formatPeso } from '@/lib/peso'
 
 export default async function TrainingPage() {
   const supabase = await createClient()
@@ -60,8 +61,8 @@ export default async function TrainingPage() {
   for (const log of logRows) {
     for (const ex of log.exercise_logs) {
       if (!ex.weight_used) continue
-      const kg = parseFloat(ex.weight_used.replace(/[^0-9.]/g, ''))
-      if (isNaN(kg) || kg <= 0) continue
+      const kg = parsePeso(ex.weight_used)
+      if (kg === null || kg <= 0) continue
       ;(progressMap[ex.exercise_name] ??= []).push({ date: log.log_date, weight: kg })
     }
   }
@@ -112,7 +113,7 @@ export default async function TrainingPage() {
                         {[
                           ex.sets && `${ex.sets} series`,
                           ex.reps && `× ${ex.reps} reps`,
-                          ex.suggested_weight && `· ${ex.suggested_weight}`,
+                          ex.suggested_weight && `· ${formatPeso(ex.suggested_weight)}`,
                         ].filter(Boolean).join(' ')}
                       </p>
                       {ex.notes && <p className="text-xs text-gray-400 mt-0.5 italic">{ex.notes}</p>}
@@ -169,7 +170,7 @@ export default async function TrainingPage() {
                         {[
                           ex.sets_done && `${ex.sets_done}×`,
                           ex.reps_done,
-                          ex.weight_used && `· ${ex.weight_used}`,
+                          ex.weight_used && `· ${formatPeso(ex.weight_used)}`,
                         ].filter(Boolean).join(' ') || '—'}
                       </p>
                     </div>

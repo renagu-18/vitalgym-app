@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, Loader2, Check, ChevronDown, ChevronUp } from 'lucide-react'
 import { createMeasurement } from '@/app/admin/measurements/[clientId]/actions'
+import { parsePeso, confirmarPesosAltos } from '@/lib/peso'
 
 interface Props {
   clientId: string
@@ -38,11 +39,18 @@ export default function MeasurementForm({ clientId }: Props) {
   const [notes, setNotes] = useState('')
 
   function handleSubmit() {
+    const weightKg = parsePeso(values.weight_kg)
+    if (values.weight_kg.trim() && weightKg === null) {
+      setError('Peso inválido. Escribe solo el número, por ejemplo 72,5')
+      return
+    }
+    if (!confirmarPesosAltos([{ label: 'Peso corporal', kg: weightKg }])) return
+
     setError(null)
     startTransition(async () => {
       const data = {
         measured_at: date,
-        weight_kg: values.weight_kg ? parseFloat(values.weight_kg) : null,
+        weight_kg: weightKg,
         height_cm: values.height_cm ? parseFloat(values.height_cm) : null,
         body_fat_pct: values.body_fat_pct ? parseFloat(values.body_fat_pct) : null,
         biceps_mm: values.biceps_mm ? parseFloat(values.biceps_mm) : null,
@@ -90,9 +98,9 @@ export default function MeasurementForm({ clientId }: Props) {
                   {f.label} <span className="text-gray-400">({f.unit})</span>
                 </label>
                 <input
-                  type="number"
-                  step="0.1"
-                  min="0"
+                  {...(f.key === 'weight_kg'
+                    ? { type: 'text', inputMode: 'decimal' as const }
+                    : { type: 'number', step: '0.1', min: '0' })}
                   placeholder="—"
                   value={values[f.key]}
                   onChange={e => setValues(v => ({ ...v, [f.key]: e.target.value }))}

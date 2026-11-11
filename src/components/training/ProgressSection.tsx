@@ -1,5 +1,7 @@
 'use client'
 
+import { formatPeso } from '@/lib/peso'
+
 interface DataPoint { date: string; weight: number }
 interface Series { name: string; points: DataPoint[] }
 
@@ -41,7 +43,7 @@ function MiniChart({ series }: { series: Series }) {
         <p className="text-sm font-semibold text-gray-800 truncate flex-1 mr-2">{name}</p>
         <span className={`text-xs font-bold px-2 py-0.5 rounded-full flex-shrink-0
           ${isUp ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-          {isUp ? '+' : ''}{delta.toFixed(1)} kg
+          {isUp ? '+' : ''}{formatPeso(Math.round(delta * 10) / 10)}
         </span>
       </div>
       <div className="flex items-center gap-3">
@@ -65,8 +67,8 @@ function MiniChart({ series }: { series: Series }) {
           ))}
         </svg>
         <div className="text-right flex-shrink-0 w-14">
-          <p className="text-[10px] text-gray-400">{first} kg</p>
-          <p className="text-sm font-bold text-gray-900">{last} kg</p>
+          <p className="text-[10px] text-gray-400">{formatPeso(first)}</p>
+          <p className="text-sm font-bold text-gray-900">{formatPeso(last)}</p>
         </div>
       </div>
     </div>

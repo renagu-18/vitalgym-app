@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash2, Loader2 } from 'lucide-react'
 import { deleteMeasurement } from '@/app/admin/measurements/[clientId]/actions'
+import { formatPeso } from '@/lib/peso'
 
 type Measurement = {
   id: string
@@ -118,9 +119,9 @@ export default function MeasurementHistory({ measurements, clientId, isAdmin = f
                 <div key={key} className="bg-gray-50 rounded-lg p-2.5 flex items-center justify-between gap-2">
                   <div>
                     <p className="text-[10px] text-gray-400">{label}</p>
-                    <p className="text-sm font-bold text-gray-900">{latest}<span className="text-xs font-normal text-gray-400"> {unit}</span></p>
+                    <p className="text-sm font-bold text-gray-900">{key === 'weight_kg' ? formatPeso(latest, false) : latest}<span className="text-xs font-normal text-gray-400"> {unit}</span></p>
                     <p className={`text-[10px] font-medium ${delta === 0 ? 'text-gray-400' : improving ? 'text-green-600' : 'text-red-500'}`}>
-                      {delta > 0 ? '+' : ''}{delta.toFixed(1)} {unit}
+                      {delta > 0 ? '+' : ''}{key === 'weight_kg' ? formatPeso(Math.round(delta * 10) / 10, false) : delta.toFixed(1)} {unit}
                     </p>
                   </div>
                   <MiniLineChart data={vals} color={color} />
@@ -152,7 +153,7 @@ export default function MeasurementHistory({ measurements, clientId, isAdmin = f
                     if (val === null) return null
                     return (
                       <div key={key} className="bg-gray-50 rounded p-1.5 text-center">
-                        <p className="text-xs font-semibold text-gray-800">{val}</p>
+                        <p className="text-xs font-semibold text-gray-800">{key === 'weight_kg' ? formatPeso(val, false) : val}</p>
                         <p className="text-[10px] text-gray-400">{label}</p>
                         <p className="text-[9px] text-gray-300">{unit}</p>
                       </div>

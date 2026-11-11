@@ -11,6 +11,7 @@ import {
   updateExercise,
   deleteExercise,
 } from '@/app/admin/training/[clientId]/actions'
+import { parsePeso, formatPeso, confirmarPesosAltos } from '@/lib/peso'
 
 interface ExerciseData {
   id: string
@@ -94,11 +95,12 @@ export default function RoutineEditor({ clientId, activeRoutine, allRoutines }: 
   // ── Editar ejercicio ──────────────────────────────────────────────────────
   function startEditExercise(ex: ExerciseData) {
     setEditingExId(ex.id)
-    setEditDraft({ name: ex.name, sets: ex.sets, reps: ex.reps ?? '', suggested_weight: ex.suggested_weight ?? '', notes: ex.notes ?? '' })
+    setEditDraft({ name: ex.name, sets: ex.sets, reps: ex.reps ?? '', suggested_weight: formatPeso(ex.suggested_weight, false), notes: ex.notes ?? '' })
   }
 
   function handleSaveExercise(ex: ExerciseData) {
     if (!editDraft.name.trim()) return
+    if (!confirmarPesosAltos([{ label: editDraft.name.trim(), kg: parsePeso(editDraft.suggested_weight) }])) return
     run(() => updateExercise({
       exerciseId: ex.id,
       clientId,
@@ -116,6 +118,7 @@ export default function RoutineEditor({ clientId, activeRoutine, allRoutines }: 
   // ── Agregar ejercicio ─────────────────────────────────────────────────────
   function handleAddExercise() {
     if (!activeRoutine || !addDraft.name.trim()) return
+    if (!confirmarPesosAltos([{ label: addDraft.name.trim(), kg: parsePeso(addDraft.suggested_weight) }])) return
     const nextOrder = Math.max(0, ...activeRoutine.exercises.map(e => e.order_index)) + 1
     run(() => addExercise({
       routineId: activeRoutine.id,
@@ -258,7 +261,7 @@ export default function RoutineEditor({ clientId, activeRoutine, allRoutines }: 
                             {[
                               ex.sets && `${ex.sets} series`,
                               ex.reps && `× ${ex.reps} reps`,
-                              ex.suggested_weight && `· ${ex.suggested_weight}`,
+                              ex.suggested_weight && `· ${formatPeso(ex.suggested_weight)}`,
                             ].filter(Boolean).join(' ')}
                           </p>
                           {ex.notes && <p className="text-xs text-gray-400 mt-0.5 italic">{ex.notes}</p>}
@@ -417,6 +420,7 @@ function ExerciseForm({
           <label className="block text-xs text-gray-500 mb-1">Peso sugerido</label>
           <input
             type="text"
+            inputMode="decimal"
             value={draft.suggested_weight ?? ''}
             onChange={e => onChange({ ...draft, suggested_weight: e.target.value })}
             placeholder="60 kg"

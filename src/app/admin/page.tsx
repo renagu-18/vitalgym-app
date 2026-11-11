@@ -172,6 +172,7 @@ export default async function AdminDashboardPage() {
           }
         : null,
       lastSessions: lastLogs.map(log => ({
+        id: log.id,
         date: log.log_date,
         notes: log.notes,
         exercises: log.exercise_logs ?? [],
